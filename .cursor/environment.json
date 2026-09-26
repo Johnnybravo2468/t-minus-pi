@@ -1,0 +1,10 @@
+{
+  "name": "t-minus-pi",
+  "install": "pip install --user -r requirements.txt && ([ -f config.yaml ] || cp config.example.yaml config.yaml)",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "python3 -m uvicorn src.app:app --host 127.0.0.1 --port 8000 --reload"
+    }
+  ]
+}
