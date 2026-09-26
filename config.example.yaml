@@ -59,3 +59,42 @@ routes:
         stop_name: "Andrew"
         direction_id: 0
         direction_name: "Outbound"
+
+# Stations of interest for the physical transit display (Phase 2+).
+# These are independent of the web dashboard `routes` above and are cycled
+# through with the physical buttons via the StationManager. Uses the same
+# fields as a route. If this section is omitted, the StationManager falls back
+# to a built-in default list (Fenway, Kenmore, Longwood on the Green Line D).
+stations:
+  - id: "fenway_green_d"
+    type: "subway"
+    route_id: "Green-D"
+    stop_id: "place-fenwy"
+    name: "Fenway - Green Line (D)"
+    directions:
+      - direction_id: 1
+        headsign: "Union Square (Inbound)"
+      - direction_id: 0
+        headsign: "Riverside (Outbound)"
+
+  - id: "kenmore_green_d"
+    type: "subway"
+    route_id: "Green-D"
+    stop_id: "place-kencl"
+    name: "Kenmore - Green Line (D)"
+    directions:
+      - direction_id: 1
+        headsign: "Union Square (Inbound)"
+      - direction_id: 0
+        headsign: "Riverside (Outbound)"
+
+  - id: "longwood_green_d"
+    type: "subway"
+    route_id: "Green-D"
+    stop_id: "place-longw"
+    name: "Longwood - Green Line (D)"
+    directions:
+      - direction_id: 1
+        headsign: "Union Square (Inbound)"
+      - direction_id: 0
+        headsign: "Riverside (Outbound)"

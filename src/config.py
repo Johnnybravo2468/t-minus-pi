@@ -64,6 +64,9 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     routes: List[RouteConfig] = Field(default_factory=list)
+    # Stations of interest for the physical display / station manager (Phase 2).
+    # Reuses the same RouteConfig model as the web dashboard's `routes`.
+    stations: List[RouteConfig] = Field(default_factory=list)
 
 
 def load_config(
@@ -105,10 +108,12 @@ def load_config(
 
     display_data = raw_data.get("display", {})
     routes_data = raw_data.get("routes", [])
+    stations_data = raw_data.get("stations", [])
 
     return AppConfig(
         mbta_api_key=api_key,
         server=ServerConfig(**server_data),
         display=DisplayConfig(**display_data),
         routes=[RouteConfig(**r) for r in routes_data],
+        stations=[RouteConfig(**s) for s in stations_data],
     )
