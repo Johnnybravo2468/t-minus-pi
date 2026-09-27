@@ -79,14 +79,26 @@ def _ruler(width: int) -> str:
     return "".join(str((i // 10) % 10) if i % 10 == 0 else "." for i in range(width))
 
 
-def build_board(departures: List[Departure]) -> PixelMatrix:
-    matrix = PixelMatrix(MATRIX_WIDTH, MATRIX_HEIGHT)
-    render_station_board(matrix, "Fenway", "GRN D", departures)
+def build_board(departures: List[Departure], width: int, height: int) -> PixelMatrix:
+    matrix = PixelMatrix(width, height)
+    # A wider panel has room for a fuller route label.
+    route_label = "GREEN LINE D" if width >= 110 else "GRN D"
+    render_station_board(matrix, "Fenway", route_label, departures)
     return matrix
+
+
+def _int_arg(name: str, default: int) -> int:
+    if name in sys.argv:
+        idx = sys.argv.index(name)
+        if idx + 1 < len(sys.argv):
+            return int(sys.argv[idx + 1])
+    return default
 
 
 def main() -> None:
     use_sample = "--sample" in sys.argv
+    width = _int_arg("--width", MATRIX_WIDTH)
+    height = _int_arg("--height", MATRIX_HEIGHT)
     png_path: Optional[str] = None
     if "--png" in sys.argv:
         idx = sys.argv.index("--png")
@@ -94,7 +106,7 @@ def main() -> None:
 
     departures = _sample_departures() if use_sample else asyncio.run(_live_departures())
 
-    matrix = build_board(departures)
+    matrix = build_board(departures, width, height)
 
     _print_metrics(matrix)
     print("Pixel preview (each '#' = one lit LED, '.' = off):")
@@ -110,10 +122,11 @@ def main() -> None:
         except ImportError:
             print("PNG output needs Pillow. Install with: pip install pillow")
 
+    cols, rows = matrix.capacity()
     print()
-    print("Verdict: 32x96 fits a compact 4-line board (1 header + 3 departures)")
-    print("at 16 chars/line with a 5x7 font. Long names must be abbreviated;")
-    print("use RGB color to code line/direction, and scroll for anything longer.")
+    print(f"Verdict: {matrix.height}x{matrix.width} fits {cols} chars x {rows} rows "
+          "at 5x7. Long names auto-abbreviate; use RGB color to code")
+    print("line/direction, and scroll for anything longer.")
 
 
 if __name__ == "__main__":
