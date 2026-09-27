@@ -1,4 +1,4 @@
-"""Run the transit board on the LED matrix (hardware phase, display only).
+"""Run the transit board on the LED matrix (hardware phase).
 
 Pipeline:
 
@@ -14,11 +14,18 @@ Off-Pi (for development), use the emulator drop-in:
     python -m src.led_display_app --emulator --once   # one frame
     python -m src.led_display_app --emulator          # live loop
 
+Interactive mode drives the SAME live LED board with the keyboard through the
+Phase 4 input seam (InputController -> AppController -> StationManager). This is
+exactly where physical buttons will plug in later:
+
+    python -m src.led_display_app --emulator --interactive
+
 Flags:
     --emulator        use RGBMatrixEmulator instead of real hardware
     --once            render a single frame and exit
     --interval N      seconds between refreshes (default 15)
     --rotate          cycle to the next station on each refresh
+    --interactive     control stations/mode from the keyboard
     --brightness N    panel brightness 1-100 (default 60)
 """
 
@@ -27,13 +34,31 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from src.app_controller import AppController
 from src.config import load_config
 from src.display_encoder import compact_route_label
+from src.input_controller import (
+    BUTTON_3,
+    NEXT_STATION,
+    PREVIOUS_STATION,
+    SimulatedInputController,
+    TOGGLE,
+)
 from src.led_matrix import PixelMatrix, render_station_board
 from src.mbta_client import MBTAClient
 from src.rpi_led_display import RaspberryPiLEDDisplay
-from src.station_manager import station_manager_from_config
+from src.station_manager import StationManager, station_manager_from_config
 from src.transit_service import fetch_station_departures
+
+# Keyboard keys mapped to abstract input events (the same events physical
+# buttons will emit through a WirelessInputController later).
+KEY_TO_EVENT = {
+    "n": NEXT_STATION,
+    "p": PREVIOUS_STATION,
+    "t": TOGGLE,
+    "3": BUTTON_3,
+}
+KEY_HELP = "Keys: n=next, p=previous, t=toggle mode, 3=button3, q=quit"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -42,6 +67,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true", help="render one frame and exit")
     parser.add_argument("--interval", type=int, default=15, help="seconds between refreshes")
     parser.add_argument("--rotate", action="store_true", help="cycle stations each refresh")
+    parser.add_argument("--interactive", action="store_true", help="keyboard/button control")
     parser.add_argument("--brightness", type=int, default=60, help="brightness 1-100")
     return parser.parse_args()
 
@@ -53,23 +79,26 @@ def build_board(display: RaspberryPiLEDDisplay, station_name: str, departures) -
     return matrix
 
 
-async def _run(args: argparse.Namespace) -> None:
+async def _render_current(
+    client: MBTAClient, display: RaspberryPiLEDDisplay, manager: StationManager
+) -> None:
+    """Fetch live data for the selected station and push it to the panel."""
+    station = manager.current_station()
+    header_name = station.name.split(" - ")[0]
+    departures = await fetch_station_departures(
+        client, station, station_name=header_name, max_per_direction=3
+    )
+    display.render(build_board(display, header_name, departures))
+
+
+async def _run_loop(args: argparse.Namespace) -> None:
     config = load_config()
     manager = station_manager_from_config(config)
-    display = RaspberryPiLEDDisplay(
-        brightness=args.brightness, use_emulator=args.emulator
-    )
+    display = RaspberryPiLEDDisplay(brightness=args.brightness, use_emulator=args.emulator)
     client = MBTAClient(api_key=config.mbta_api_key)
     try:
         while True:
-            station = manager.current_station()
-            header_name = station.name.split(" - ")[0]
-            departures = await fetch_station_departures(
-                client, station, station_name=header_name, max_per_direction=3
-            )
-            board = build_board(display, header_name, departures)
-            display.render(board)
-
+            await _render_current(client, display, manager)
             if args.once:
                 break
             if args.rotate:
@@ -80,8 +109,46 @@ async def _run(args: argparse.Namespace) -> None:
         display.clear()
 
 
+async def _run_interactive(args: argparse.Namespace) -> None:
+    config = load_config()
+    manager = station_manager_from_config(config)
+    controller = AppController(manager)
+    inputs = SimulatedInputController()
+    controller.connect(inputs)
+
+    display = RaspberryPiLEDDisplay(brightness=args.brightness, use_emulator=args.emulator)
+    client = MBTAClient(api_key=config.mbta_api_key)
+    try:
+        await _render_current(client, display, manager)
+        print(KEY_HELP)
+        while True:
+            try:
+                key = input("> ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if key == "q":
+                break
+            event = KEY_TO_EVENT.get(key)
+            if event is None:
+                print("  (unknown key)")
+                continue
+            # A physical button press would arrive the same way, via the
+            # InputController -> AppController -> StationManager chain.
+            inputs.emit(event)
+            await _render_current(client, display, manager)
+            print(f"  [{manager.mode.value}] {manager.current_station().name}")
+    finally:
+        await client.aclose()
+        display.clear()
+
+
 def main() -> None:
-    asyncio.run(_run(_parse_args()))
+    args = _parse_args()
+    if args.interactive:
+        asyncio.run(_run_interactive(args))
+    else:
+        asyncio.run(_run_loop(args))
 
 
 if __name__ == "__main__":
