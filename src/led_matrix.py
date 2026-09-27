@@ -24,6 +24,7 @@ RGB = Tuple[int, int, int]
 WHITE: RGB = (235, 235, 235)
 GREEN: RGB = (0, 200, 60)       # Green Line
 AMBER: RGB = (255, 176, 0)      # arrival minutes
+CYAN: RGB = (0, 180, 200)       # section headers (INBOUND / OUTBOUND)
 DIM: RGB = (90, 90, 90)
 
 # Character cell = glyph + 1px spacing, so 6px wide x 8px tall.
@@ -120,22 +121,16 @@ def render_station_board(
     departures: List[Departure],
     line_color: RGB = GREEN,
 ) -> None:
-    """Lay out a compact station board onto the matrix.
+    """Lay out a station board onto the matrix, adapting to the panel size.
 
-    Layout for a 32x96 panel (16 cols x 4 rows at 5x7):
-        row 0: station name (left)      route label (right)
-        row 1: first inbound  departure (destination + minutes)
-        row 2: first outbound departure
-        row 3: second outbound (or a second inbound) departure
+    - Short panels (fewer than 7 text rows, e.g. 32x96) use a compact layout:
+      a header row followed by one inbound and up to two outbound departures,
+      each tagged ``I``/``O``.
+    - Tall panels (7+ rows, e.g. two chained 64x64 panels = 64x128) use a
+      sectioned layout with ``INBOUND`` / ``OUTBOUND`` headings and more rows.
     """
-    cols, _rows = matrix.capacity()
+    cols, rows = matrix.capacity()
     right_x = matrix.width - 1
-    minutes_chars = 3
-    dest_chars = cols - minutes_chars - 1  # leave a gap before minutes
-
-    # Row 0: header
-    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), WHITE)
-    matrix.draw_text_right(right_x, 0, route_label, line_color)
 
     inbound = sorted(
         [d for d in departures if d.direction == "Inbound"], key=lambda d: d.arrival_time
@@ -144,7 +139,26 @@ def render_station_board(
         [d for d in departures if d.direction == "Outbound"], key=lambda d: d.arrival_time
     )
 
-    # Pick up to 3 rows: 1 inbound, then outbound(s).
+    # Row 0: header (station left, route right).
+    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), WHITE)
+    matrix.draw_text_right(right_x, 0, route_label, line_color)
+
+    if rows >= 7:
+        _render_sections(matrix, cols, rows, right_x, inbound, outbound, line_color)
+    else:
+        _render_compact(matrix, cols, right_x, inbound, outbound, line_color)
+
+
+def _render_compact(
+    matrix: PixelMatrix,
+    cols: int,
+    right_x: int,
+    inbound: List[Departure],
+    outbound: List[Departure],
+    line_color: RGB,
+) -> None:
+    dest_chars = cols - 3 - 1 - 2  # minutes(3) + gap + I/O tag(2)
+
     picks: List[Departure] = []
     if inbound:
         picks.append(inbound[0])
@@ -154,7 +168,38 @@ def render_station_board(
     for i, dep in enumerate(picks):
         y = (i + 1) * CELL_HEIGHT
         tag = "I" if dep.direction == "Inbound" else "O"
-        dest = _abbreviate(dep.destination, dest_chars - 2)
         matrix.draw_text(0, y, tag, line_color)
-        matrix.draw_text(2 * CELL_WIDTH, y, dest, WHITE)
+        matrix.draw_text(2 * CELL_WIDTH, y, _abbreviate(dep.destination, dest_chars), WHITE)
         matrix.draw_text_right(right_x, y, str(dep.minutes), AMBER)
+
+
+def _render_sections(
+    matrix: PixelMatrix,
+    cols: int,
+    rows: int,
+    right_x: int,
+    inbound: List[Departure],
+    outbound: List[Departure],
+    line_color: RGB,
+) -> None:
+    dest_chars = cols - 3 - 1  # minutes(3) + gap; no per-row tag needed
+
+    # Split the rows below the header (and one blank) between the two sections.
+    per_direction = max(1, (rows - 3) // 2)
+
+    def draw_section(start_row: int, label: str, deps: List[Departure]) -> int:
+        matrix.draw_text(0, start_row * CELL_HEIGHT, label, CYAN)
+        row = start_row
+        if not deps:
+            row += 1
+            matrix.draw_text(CELL_WIDTH, row * CELL_HEIGHT, "NO SERVICE", DIM)
+            return row + 1
+        for dep in deps[:per_direction]:
+            row += 1
+            y = row * CELL_HEIGHT
+            matrix.draw_text(0, y, _abbreviate(dep.destination, dest_chars), WHITE)
+            matrix.draw_text_right(right_x, y, str(dep.minutes), AMBER)
+        return row + 1
+
+    next_row = draw_section(2, "INBOUND", inbound)
+    draw_section(next_row, "OUTBOUND", outbound)
