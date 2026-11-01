@@ -62,8 +62,14 @@ def test_options_configured_for_two_64x64_panels():
     assert opts.chain_length == 2
     assert opts.hardware_mapping == "adafruit-hat"  # default
     assert opts.parallel == 1
+    assert opts.drop_privileges is True  # driver default matches library
     assert display.width == 128
     assert display.height == 64
+
+
+def test_drop_privileges_can_be_disabled():
+    RaspberryPiLEDDisplay(drop_privileges=False, backend=_backend())
+    assert FakeMatrix.last_instance.options.drop_privileges is False
 
 
 def test_triple_bonnet_regular_mapping():

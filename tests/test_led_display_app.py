@@ -51,6 +51,19 @@ def test_make_display_forwards_mapping(monkeypatch):
     )
     _make_display(args)
     assert FakeMatrix.last_instance.options.hardware_mapping == "regular"
+    # App keeps privileges by default so it can read the venv under /home.
+    assert FakeMatrix.last_instance.options.drop_privileges is False
+
+
+def test_drop_privileges_flag_opts_in(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["prog", "--drop-privileges"])
+    args = _parse_args()
+    monkeypatch.setattr(
+        "src.led_display_app.RaspberryPiLEDDisplay",
+        lambda **kw: RaspberryPiLEDDisplay(backend=(FakeMatrix, FakeOptions), **kw),
+    )
+    _make_display(args)
+    assert FakeMatrix.last_instance.options.drop_privileges is True
 
 
 def test_build_board_matches_display_size_and_draws():

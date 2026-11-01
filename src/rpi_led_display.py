@@ -50,6 +50,7 @@ class RaspberryPiLEDDisplay:
         brightness: int = 60,
         hardware_mapping: str = "adafruit-hat",
         gpio_slowdown: int = 4,
+        drop_privileges: bool = True,
         use_emulator: bool = False,
         backend: Optional[Tuple[type, type]] = None,
     ):
@@ -68,6 +69,13 @@ class RaspberryPiLEDDisplay:
         # gpio_slowdown may not exist on every build; set defensively.
         try:
             options.gpio_slowdown = gpio_slowdown
+        except AttributeError:
+            pass
+        # By default the library drops root to the 'daemon' user after init for
+        # security. That prevents later reads of a venv under the user's home
+        # (breaking lazy imports like httpx->httpcore). Allow keeping privileges.
+        try:
+            options.drop_privileges = drop_privileges
         except AttributeError:
             pass
 
