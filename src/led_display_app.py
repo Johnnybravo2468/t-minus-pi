@@ -81,6 +81,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--cols", type=int, default=64, help="pixel cols per panel")
     parser.add_argument("--chain", type=int, default=2, help="panels chained per output")
     parser.add_argument("--parallel", type=int, default=1, help="parallel chains (outputs)")
+    # The matrix library drops root->'daemon' after init by default, which stops
+    # the process reading its venv under /home (breaks httpx/httpcore imports).
+    # We keep privileges by default so the app works from a venv; opt back into
+    # the more secure behavior with --drop-privileges.
+    parser.add_argument("--drop-privileges", action="store_true",
+                        help="drop to 'daemon' user after init (more secure; needs a system-readable venv)")
     return parser.parse_args()
 
 
@@ -92,6 +98,7 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
         parallel=args.parallel,
         brightness=args.brightness,
         hardware_mapping=args.gpio_mapping,
+        drop_privileges=args.drop_privileges,
         use_emulator=args.emulator,
     )
 
