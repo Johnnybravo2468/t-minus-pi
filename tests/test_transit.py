@@ -53,6 +53,8 @@ def test_line_and_branch():
     assert _line_and_branch("Green-D") == ("Green Line", "D")
     assert _line_and_branch("Red") == ("Red Line", None)
     assert _line_and_branch("39") == ("39", None)
+    # A combined Green trunk route has no single branch.
+    assert _line_and_branch("Green-B,Green-C,Green-D,Green-E") == ("Green Line", None)
 
 
 def test_normalize_departures_maps_fields_and_directions():
