@@ -9,6 +9,7 @@ from src.display_encoder import (
     DisplayFrame,
     compact_route_label,
 )
+from src.led_matrix import BLUE, GREEN, ORANGE, PURPLE, RED, WHITE, color_for_line
 from src.transit_model import Departure
 
 
@@ -38,6 +39,16 @@ def test_frame_pads_all_rows_to_width():
     assert all(len(row) == 20 for row in frame.rows)
     assert frame.rows[0] == "short".ljust(20)
     assert frame.rows[1] == "x" * 20  # truncated
+
+
+def test_color_for_line_maps_brand_colors():
+    assert color_for_line("Green Line", "D") == GREEN
+    assert color_for_line("Red Line") == RED
+    assert color_for_line("Orange Line") == ORANGE
+    assert color_for_line("Blue Line") == BLUE
+    assert color_for_line("CR-Worcester") == PURPLE
+    assert color_for_line("Commuter Rail") == PURPLE
+    assert color_for_line("39") == WHITE  # unknown -> white
 
 
 def test_compact_route_label():

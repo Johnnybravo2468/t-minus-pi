@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from time import monotonic
 
 from src.app_controller import AppController
 from src.config import load_config
@@ -48,7 +49,7 @@ from src.input_controller import (
     SimulatedInputController,
     TOGGLE,
 )
-from src.led_matrix import PixelMatrix, render_station_board
+from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
 from src.mbta_client import MBTAClient
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, station_manager_from_config
@@ -105,9 +106,37 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
 
 def build_board(display: RaspberryPiLEDDisplay, station_name: str, departures) -> PixelMatrix:
     matrix = PixelMatrix(display.width, display.height)
-    route_label = compact_route_label(departures[0]) if departures else ""
-    render_station_board(matrix, station_name, route_label, departures)
+    if departures:
+        route_label = compact_route_label(departures[0])
+        line_color = color_for_line(departures[0].line, departures[0].branch)
+    else:
+        route_label = ""
+        line_color = WHITE
+    render_station_board(matrix, station_name, route_label, departures, line_color=line_color)
     return matrix
+
+
+# Short-lived cache of normalized departures per station. This prevents rapid
+# key presses (e.g. toggling) from hammering the MBTA API and hitting its
+# unauthenticated ~20 req/min limit (HTTP 429). It also lets us keep showing the
+# last good board if a refresh fails.
+CACHE_TTL_SECONDS = 10.0
+_DEPARTURE_CACHE: dict = {}
+
+
+async def _get_departures(client: MBTAClient, station, header_name: str):
+    now = monotonic()
+    cached = _DEPARTURE_CACHE.get(station.id)
+    if cached and now - cached[0] < CACHE_TTL_SECONDS:
+        return cached[1]
+    departures = await fetch_station_departures(
+        client, station, station_name=header_name, max_per_direction=3
+    )
+    if departures:
+        _DEPARTURE_CACHE[station.id] = (now, departures)
+        return departures
+    # Fetch returned nothing (e.g. rate-limited): reuse the last good board.
+    return cached[1] if cached else departures
 
 
 async def _render_current(
@@ -116,9 +145,7 @@ async def _render_current(
     """Fetch live data for the selected station and push it to the panel."""
     station = manager.current_station()
     header_name = station.name.split(" - ")[0]
-    departures = await fetch_station_departures(
-        client, station, station_name=header_name, max_per_direction=3
-    )
+    departures = await _get_departures(client, station, header_name)
     display.render(build_board(display, header_name, departures))
 
 

@@ -98,3 +98,35 @@ stations:
         headsign: "Union Square (Inbound)"
       - direction_id: 0
         headsign: "Riverside (Outbound)"
+
+# --- Optional "line tour" -------------------------------------------------
+# Representative stops on each line. If you replace the `stations:` list above
+# with these, cycling stations (buttons / n,p keys) steps through the lines and
+# the top-right indicator shows each line's brand color (green/red/orange/
+# blue/purple). All stop_ids/route_ids below are verified against the live API.
+#
+#   - id: "green_d_fenway"
+#     type: "subway"
+#     route_id: "Green-D"
+#     stop_id: "place-fenwy"
+#     name: "Fenway - Green Line (D)"
+#   - id: "red_dtx"
+#     type: "subway"
+#     route_id: "Red"
+#     stop_id: "place-dwnxg"
+#     name: "Downtown Crossing - Red Line"
+#   - id: "orange_dtx"
+#     type: "subway"
+#     route_id: "Orange"
+#     stop_id: "place-dwnxg"
+#     name: "Downtown Crossing - Orange Line"
+#   - id: "blue_gov"
+#     type: "subway"
+#     route_id: "Blue"
+#     stop_id: "place-gover"
+#     name: "Government Center - Blue Line"
+#   - id: "cr_worcester_south"
+#     type: "commuter_rail"
+#     route_id: "CR-Worcester"
+#     stop_id: "place-sstat"
+#     name: "South Station - Worcester Line"
