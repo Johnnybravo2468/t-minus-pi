@@ -50,6 +50,7 @@ from src.input_controller import (
     TOGGLE,
 )
 from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
+from src.line_stations import build_all_line_stations
 from src.mbta_client import MBTAClient
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, station_manager_from_config
@@ -88,7 +89,21 @@ def _parse_args() -> argparse.Namespace:
     # the more secure behavior with --drop-privileges.
     parser.add_argument("--drop-privileges", action="store_true",
                         help="drop to 'daemon' user after init (more secure; needs a system-readable venv)")
+    # Load every station on every line straight from the MBTA API, grouped by
+    # line (toggle cycles lines; next/previous move within a line).
+    parser.add_argument("--all-lines", action="store_true",
+                        help="load every station on every subway line from the MBTA API")
+    parser.add_argument("--include-commuter", action="store_true",
+                        help="with --all-lines, also include commuter rail")
     return parser.parse_args()
+
+
+async def _build_manager(args: argparse.Namespace, config, client: MBTAClient) -> StationManager:
+    if args.all_lines:
+        stations = await build_all_line_stations(client, include_commuter=args.include_commuter)
+        if stations:
+            return StationManager(stations)
+    return station_manager_from_config(config)
 
 
 def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
@@ -151,9 +166,9 @@ async def _render_current(
 
 async def _run_loop(args: argparse.Namespace) -> None:
     config = load_config()
-    manager = station_manager_from_config(config)
     display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
+    manager = await _build_manager(args, config, client)
     try:
         while True:
             await _render_current(client, display, manager)
@@ -169,13 +184,12 @@ async def _run_loop(args: argparse.Namespace) -> None:
 
 async def _run_interactive(args: argparse.Namespace) -> None:
     config = load_config()
-    manager = station_manager_from_config(config)
+    display = _make_display(args)
+    client = MBTAClient(api_key=config.mbta_api_key)
+    manager = await _build_manager(args, config, client)
     controller = AppController(manager)
     inputs = SimulatedInputController()
     controller.connect(inputs)
-
-    display = _make_display(args)
-    client = MBTAClient(api_key=config.mbta_api_key)
     try:
         await _render_current(client, display, manager)
         print(KEY_HELP)
