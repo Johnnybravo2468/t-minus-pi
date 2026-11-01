@@ -1,0 +1,33 @@
+# t-minus-pi LED matrix display - systemd service (example)
+#
+# Runs the LED transit board automatically on boot, headless (no SSH session),
+# and restarts it if it crashes.
+#
+# Driving the panels needs root for GPIO access, so this runs as root (the app
+# keeps privileges by default). Before installing, edit the paths below:
+#   - replace /home/pi with your home directory (e.g. /home/johnnybravo2468)
+#   - for the Adafruit Triple Bonnet keep "--gpio-mapping regular"
+#
+# ExecStart options you can mix in:
+#   --all-lines            load every station on every line (browse with buttons)
+#   --rotate --interval 20 auto-cycle configured stations every 20s
+#   --brightness 50        dim/brighten the panels (1-100)
+
+[Unit]
+Description=t-minus-pi LED Matrix Transit Display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root is required for GPIO access to drive the LED panels.
+User=root
+WorkingDirectory=/home/pi/t-minus-pi
+ExecStart=/home/pi/t-minus-pi/.venv/bin/python -m src.led_display_app --gpio-mapping regular
+Restart=always
+RestartSec=5
+# Loads MBTA_API_KEY (if present); the leading '-' makes it optional.
+EnvironmentFile=-/home/pi/t-minus-pi/.env
+
+[Install]
+WantedBy=multi-user.target
