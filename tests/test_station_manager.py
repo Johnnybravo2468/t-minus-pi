@@ -59,6 +59,35 @@ def test_select_unknown_id_raises():
         m.select_station("zzz")
 
 
+def _multiline():
+    return [
+        RouteConfig(id="g1", type="subway", route_id="Green-D", stop_id="s1", name="Green 1"),
+        RouteConfig(id="g2", type="subway", route_id="Green-D", stop_id="s2", name="Green 2"),
+        RouteConfig(id="r1", type="subway", route_id="Red", stop_id="s3", name="Red 1"),
+        RouteConfig(id="cr", type="commuter_rail", route_id="CR-Worcester", stop_id="s4", name="CR"),
+    ]
+
+
+def test_current_line_family():
+    m = StationManager(_multiline())
+    assert m.current_line() == "GREEN"
+
+
+def test_next_line_cycles_families_and_lands_on_first_of_line():
+    m = StationManager(_multiline())
+    assert m.next_line().id == "r1"       # GREEN -> RED (first red station)
+    assert m.current_line() == "RED"
+    assert m.next_line().id == "cr"       # RED -> COMMUTER
+    assert m.current_line() == "COMMUTER"
+    assert m.next_line().id == "g1"       # wraps to GREEN (first green station)
+
+
+def test_next_line_single_line_is_noop():
+    m = StationManager(_stations("a", "b", "c"))  # all Green-D
+    assert m.next_line().id == "a"
+    assert m.current_index == 0
+
+
 def test_toggle_mode_flips():
     m = StationManager(_stations("a"))
     assert m.mode is DisplayMode.NORMAL

@@ -45,7 +45,8 @@ class AppController:
         self._actions: Dict[str, Callable[[], object]] = {
             NEXT_STATION: self.stations.next_station,
             PREVIOUS_STATION: self.stations.previous_station,
-            TOGGLE: self.stations.toggle_mode,
+            # The dedicated toggle button cycles through lines.
+            TOGGLE: self.stations.next_line,
             # BUTTON_3 is a placeholder "confirm / select current" for now.
             BUTTON_3: self.stations.current_station,
         }

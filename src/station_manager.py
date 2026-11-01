@@ -33,6 +33,20 @@ class DisplayMode(Enum):
     STATION_SELECT = "Station Selection Mode"
 
 
+def _line_family(station: RouteConfig) -> str:
+    """Group a station's route into a line 'family' used for line cycling.
+
+    e.g. any Green-* -> 'GREEN', Red -> 'RED', CR-* -> 'COMMUTER'.
+    """
+    route_id = (station.route_id or "").upper()
+    for family in ("GREEN", "RED", "ORANGE", "BLUE"):
+        if route_id.startswith(family):
+            return family
+    if route_id.startswith("CR-"):
+        return "COMMUTER"
+    return route_id or (station.type or "").upper()
+
+
 def _green_d_station(station_id: str, name: str, stop_id: str) -> RouteConfig:
     """Helper to build a Green Line (D) station definition."""
     return RouteConfig(
@@ -93,6 +107,38 @@ class StationManager:
     def previous_station(self) -> RouteConfig:
         """Go to the previous station, wrapping around to the last."""
         self._index = (self._index - 1) % self.station_count
+        return self.current_station()
+
+    # --- line cycling ------------------------------------------------------
+
+    def current_line(self) -> str:
+        """The line family of the currently selected station (e.g. 'GREEN')."""
+        return _line_family(self.current_station())
+
+    def _line_order(self) -> List[str]:
+        """Distinct line families in configured order."""
+        order: List[str] = []
+        for station in self._stations:
+            family = _line_family(station)
+            if family not in order:
+                order.append(family)
+        return order
+
+    def next_line(self) -> RouteConfig:
+        """Jump to the first station of the next line family (wraps around).
+
+        If only one line is configured, this is a no-op. This is what the
+        dedicated toggle button drives.
+        """
+        families = self._line_order()
+        if len(families) <= 1:
+            return self.current_station()
+        current = self.current_line()
+        next_family = families[(families.index(current) + 1) % len(families)]
+        for i, station in enumerate(self._stations):
+            if _line_family(station) == next_family:
+                self._index = i
+                break
         return self.current_station()
 
     def select_station(self, station: Union[int, str]) -> RouteConfig:
