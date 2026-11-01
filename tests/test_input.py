@@ -9,13 +9,21 @@ from src.input_controller import (
     SimulatedInputController,
     TOGGLE,
 )
-from src.station_manager import DisplayMode, StationManager
+from src.station_manager import StationManager
 
 
 def _stations(*ids: str):
     return [
         RouteConfig(id=i, type="subway", route_id="Green-D", stop_id=f"stop-{i}", name=i.title())
         for i in ids
+    ]
+
+
+def _multiline_stations():
+    return [
+        RouteConfig(id="g", type="subway", route_id="Green-D", stop_id="s1", name="Green"),
+        RouteConfig(id="r", type="subway", route_id="Red", stop_id="s2", name="Red"),
+        RouteConfig(id="b", type="subway", route_id="Blue", stop_id="s3", name="Blue"),
     ]
 
 
@@ -46,8 +54,18 @@ def test_app_controller_maps_events_to_station_actions():
     assert manager.current_station().id == "b"
     controller.handle_event(PREVIOUS_STATION)
     assert manager.current_station().id == "a"
+
+
+def test_toggle_event_cycles_lines():
+    manager = StationManager(_multiline_stations())
+    controller = AppController(manager)
+    assert manager.current_line() == "GREEN"
     controller.handle_event(TOGGLE)
-    assert manager.mode is DisplayMode.STATION_SELECT
+    assert manager.current_line() == "RED"
+    controller.handle_event(TOGGLE)
+    assert manager.current_line() == "BLUE"
+    controller.handle_event(TOGGLE)
+    assert manager.current_line() == "GREEN"  # wraps
 
 
 def test_app_controller_ignores_unknown_event():
