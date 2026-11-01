@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from src.input_controller import BUTTON_3, NEXT_STATION, PREVIOUS_STATION, TOGGLE
-from src.led_display_app import KEY_TO_EVENT, build_board
+from src.led_display_app import KEY_TO_EVENT, _make_display, _parse_args, build_board
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.transit_model import Departure
 from tests.test_rpi_led_display import FakeOptions, FakeMatrix
@@ -26,6 +26,31 @@ def test_key_map_covers_all_buttons():
         "t": TOGGLE,
         "3": BUTTON_3,
     }
+
+
+def test_parse_args_defaults_and_triple_bonnet(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["prog"])
+    args = _parse_args()
+    assert args.gpio_mapping == "adafruit-hat"
+    assert args.rows == 64 and args.cols == 64
+    assert args.chain == 2 and args.parallel == 1
+
+    monkeypatch.setattr("sys.argv", ["prog", "--gpio-mapping", "regular", "--parallel", "2"])
+    args = _parse_args()
+    assert args.gpio_mapping == "regular"
+    assert args.parallel == 2
+
+
+def test_make_display_forwards_mapping(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["prog", "--gpio-mapping", "regular"])
+    args = _parse_args()
+    # Build with the fake backend so no hardware is needed.
+    monkeypatch.setattr(
+        "src.led_display_app.RaspberryPiLEDDisplay",
+        lambda **kw: RaspberryPiLEDDisplay(backend=(FakeMatrix, FakeOptions), **kw),
+    )
+    _make_display(args)
+    assert FakeMatrix.last_instance.options.hardware_mapping == "regular"
 
 
 def test_build_board_matches_display_size_and_draws():

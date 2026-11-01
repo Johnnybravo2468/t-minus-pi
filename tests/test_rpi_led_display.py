@@ -60,6 +60,20 @@ def test_options_configured_for_two_64x64_panels():
     assert opts.rows == 64
     assert opts.cols == 64
     assert opts.chain_length == 2
+    assert opts.hardware_mapping == "adafruit-hat"  # default
+    assert opts.parallel == 1
+    assert display.width == 128
+    assert display.height == 64
+
+
+def test_triple_bonnet_regular_mapping():
+    display = RaspberryPiLEDDisplay(
+        hardware_mapping="regular", chain_length=2, parallel=1, backend=_backend()
+    )
+    opts = FakeMatrix.last_instance.options
+    assert opts.hardware_mapping == "regular"
+    assert opts.chain_length == 2
+    assert opts.parallel == 1
     assert display.width == 128
     assert display.height == 64
 
