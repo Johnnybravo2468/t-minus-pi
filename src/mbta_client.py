@@ -170,6 +170,44 @@ class MBTAClient:
             "filter[min_time]": f"{service_hour:02d}:{local_now.minute:02d}",
         }
 
+    async def fetch_route_ids(self, types: str) -> List[tuple[str, str]]:
+        """Return (route_id, long_name) for all routes of the given type(s).
+
+        ``types`` is a comma-separated MBTA route_type filter, e.g. "0,1" for
+        subway (light + heavy rail) or "0,1,2" to also include commuter rail.
+        """
+        params = {
+            "filter[type]": types,
+            "fields[route]": "long_name",
+            "sort": "sort_order",
+        }
+        response = await self._get_http_client().get(
+            f"{self.base_url}/routes", params=params, headers=self._get_headers()
+        )
+        response.raise_for_status()
+        routes = []
+        for item in response.json().get("data", []) or []:
+            route_id = item.get("id")
+            long_name = (item.get("attributes") or {}).get("long_name") or route_id
+            if route_id:
+                routes.append((route_id, long_name))
+        return routes
+
+    async def fetch_route_stops(self, route_id: str) -> List[Dict[str, str]]:
+        """Return [{id, name}] for the parent stops served by a route, in order."""
+        params = {"filter[route]": route_id, "fields[stop]": "name"}
+        response = await self._get_http_client().get(
+            f"{self.base_url}/stops", params=params, headers=self._get_headers()
+        )
+        response.raise_for_status()
+        stops = []
+        for item in response.json().get("data", []) or []:
+            stop_id = item.get("id")
+            name = (item.get("attributes") or {}).get("name") or stop_id
+            if stop_id:
+                stops.append({"id": stop_id, "name": name})
+        return stops
+
     async def fetch_predictions_raw(
         self,
         stop_id: str,
