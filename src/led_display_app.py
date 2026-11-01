@@ -9,6 +9,10 @@ On a Raspberry Pi with two chained 64x64 panels:
 
     sudo python -m src.led_display_app                # 128x64, refreshes live
 
+With the Adafruit Triple Bonnet (#6358), add the 'regular' GPIO mapping:
+
+    sudo python -m src.led_display_app --gpio-mapping regular
+
 Off-Pi (for development), use the emulator drop-in:
 
     python -m src.led_display_app --emulator --once   # one frame
@@ -69,7 +73,27 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--rotate", action="store_true", help="cycle stations each refresh")
     parser.add_argument("--interactive", action="store_true", help="keyboard/button control")
     parser.add_argument("--brightness", type=int, default=60, help="brightness 1-100")
+    # Panel/adapter geometry. Defaults suit the single Adafruit HAT/Bonnet.
+    # For the Adafruit Triple Bonnet (#6358) use: --gpio-mapping regular
+    parser.add_argument("--gpio-mapping", default="adafruit-hat",
+                        help="rpi-rgb-led-matrix GPIO mapping (Triple Bonnet: 'regular')")
+    parser.add_argument("--rows", type=int, default=64, help="pixel rows per panel")
+    parser.add_argument("--cols", type=int, default=64, help="pixel cols per panel")
+    parser.add_argument("--chain", type=int, default=2, help="panels chained per output")
+    parser.add_argument("--parallel", type=int, default=1, help="parallel chains (outputs)")
     return parser.parse_args()
+
+
+def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
+    return RaspberryPiLEDDisplay(
+        rows=args.rows,
+        cols=args.cols,
+        chain_length=args.chain,
+        parallel=args.parallel,
+        brightness=args.brightness,
+        hardware_mapping=args.gpio_mapping,
+        use_emulator=args.emulator,
+    )
 
 
 def build_board(display: RaspberryPiLEDDisplay, station_name: str, departures) -> PixelMatrix:
@@ -94,7 +118,7 @@ async def _render_current(
 async def _run_loop(args: argparse.Namespace) -> None:
     config = load_config()
     manager = station_manager_from_config(config)
-    display = RaspberryPiLEDDisplay(brightness=args.brightness, use_emulator=args.emulator)
+    display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     try:
         while True:
@@ -116,7 +140,7 @@ async def _run_interactive(args: argparse.Namespace) -> None:
     inputs = SimulatedInputController()
     controller.connect(inputs)
 
-    display = RaspberryPiLEDDisplay(brightness=args.brightness, use_emulator=args.emulator)
+    display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     try:
         await _render_current(client, display, manager)
