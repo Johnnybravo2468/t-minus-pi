@@ -37,16 +37,25 @@ def _build(include_commuter=False):
 
 def test_dedup_within_line_but_keep_across_lines():
     stations = _build()
-    ids = [s.id for s in stations]
 
     # Park Street appears once under Red and once under Green (across lines),
     # but only once within Green even though both Green-B and Green-D serve it.
     park = [s for s in stations if s.stop_id == "place-pktrm"]
     families = sorted({s.route_id.split("-")[0] for s in park})
     assert families == ["Green", "Red"]
-    # Within Green, Park Street is not duplicated by branch.
     green_park = [s for s in park if s.route_id.startswith("Green")]
     assert len(green_park) == 1
+
+
+def test_green_trunk_stop_combines_all_branches():
+    stations = _build()
+    # Park Street is served by Green-B and Green-D in the fixture; the combined
+    # Green station should list both branches so predictions include each.
+    green_park = next(
+        s for s in stations if s.stop_id == "place-pktrm" and s.route_id.startswith("Green")
+    )
+    assert green_park.route_id == "Green-B,Green-D"
+    assert green_park.name == "Park Street - Green Line"
 
 
 def test_built_stations_group_into_lines():
