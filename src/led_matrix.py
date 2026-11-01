@@ -23,9 +23,32 @@ RGB = Tuple[int, int, int]
 
 WHITE: RGB = (235, 235, 235)
 GREEN: RGB = (0, 200, 60)       # Green Line
+RED: RGB = (220, 45, 40)        # Red Line
+ORANGE: RGB = (255, 130, 0)     # Orange Line
+BLUE: RGB = (0, 100, 255)       # Blue Line
+PURPLE: RGB = (170, 70, 160)    # Commuter Rail
 AMBER: RGB = (255, 176, 0)      # arrival minutes
 CYAN: RGB = (0, 180, 200)       # section headers (INBOUND / OUTBOUND)
 DIM: RGB = (90, 90, 90)
+
+# Map an MBTA line to its brand color (LED-friendly shades).
+LINE_COLORS = {
+    "GREEN": GREEN,
+    "RED": RED,
+    "ORANGE": ORANGE,
+    "BLUE": BLUE,
+}
+
+
+def color_for_line(line: str, branch: Optional[str] = None) -> RGB:
+    """Return the brand color for a line name like 'Green Line' or 'CR-Worcester'."""
+    text = (line or "").upper()
+    for key, color in LINE_COLORS.items():
+        if text.startswith(key):
+            return color
+    if text.startswith("CR-") or "COMMUTER" in text:
+        return PURPLE
+    return WHITE
 
 # Character cell = glyph + 1px spacing, so 6px wide x 8px tall.
 CELL_WIDTH = GLYPH_WIDTH + 1

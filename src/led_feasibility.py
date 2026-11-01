@@ -19,7 +19,14 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from src.config import load_config
-from src.led_matrix import CELL_HEIGHT, CELL_WIDTH, PixelMatrix, render_station_board
+from src.led_matrix import (
+    CELL_HEIGHT,
+    CELL_WIDTH,
+    WHITE,
+    PixelMatrix,
+    color_for_line,
+    render_station_board,
+)
 from src.mbta_client import MBTAClient
 from src.station_manager import DEFAULT_STATIONS
 from src.transit_model import Departure
@@ -83,7 +90,10 @@ def build_board(departures: List[Departure], width: int, height: int) -> PixelMa
     matrix = PixelMatrix(width, height)
     # A wider panel has room for a fuller route label.
     route_label = "GREEN LINE D" if width >= 110 else "GRN D"
-    render_station_board(matrix, "Fenway", route_label, departures)
+    line_color = (
+        color_for_line(departures[0].line, departures[0].branch) if departures else WHITE
+    )
+    render_station_board(matrix, "Fenway", route_label, departures, line_color=line_color)
     return matrix
 
 
