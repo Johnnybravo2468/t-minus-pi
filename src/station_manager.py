@@ -99,14 +99,22 @@ class StationManager:
     def station_count(self) -> int:
         return len(self._stations)
 
+    def _indices_for_current_line(self) -> List[int]:
+        family = self.current_line()
+        return [i for i, s in enumerate(self._stations) if _line_family(s) == family]
+
     def next_station(self) -> RouteConfig:
-        """Advance to the next station, wrapping around to the first."""
-        self._index = (self._index + 1) % self.station_count
+        """Advance to the next station *within the current line* (wraps)."""
+        indices = self._indices_for_current_line()
+        position = indices.index(self._index)
+        self._index = indices[(position + 1) % len(indices)]
         return self.current_station()
 
     def previous_station(self) -> RouteConfig:
-        """Go to the previous station, wrapping around to the last."""
-        self._index = (self._index - 1) % self.station_count
+        """Go to the previous station *within the current line* (wraps)."""
+        indices = self._indices_for_current_line()
+        position = indices.index(self._index)
+        self._index = indices[(position - 1) % len(indices)]
         return self.current_station()
 
     # --- line cycling ------------------------------------------------------

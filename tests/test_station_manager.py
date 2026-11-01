@@ -88,6 +88,23 @@ def test_next_line_single_line_is_noop():
     assert m.current_index == 0
 
 
+def test_next_station_stays_within_current_line():
+    # Two green stops, then two red stops.
+    stations = [
+        RouteConfig(id="g1", type="subway", route_id="Green-D", stop_id="s1", name="G1"),
+        RouteConfig(id="g2", type="subway", route_id="Green-D", stop_id="s2", name="G2"),
+        RouteConfig(id="r1", type="subway", route_id="Red", stop_id="s3", name="R1"),
+        RouteConfig(id="r2", type="subway", route_id="Red", stop_id="s4", name="R2"),
+    ]
+    m = StationManager(stations)
+    assert m.next_station().id == "g2"     # within green
+    assert m.next_station().id == "g1"     # wraps within green (not into red)
+    m.next_line()                          # jump to red
+    assert m.current_station().id == "r1"
+    assert m.next_station().id == "r2"     # within red
+    assert m.next_station().id == "r1"     # wraps within red
+
+
 def test_toggle_mode_flips():
     m = StationManager(_stations("a"))
     assert m.mode is DisplayMode.NORMAL
