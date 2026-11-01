@@ -162,8 +162,9 @@ def render_station_board(
         [d for d in departures if d.direction == "Outbound"], key=lambda d: d.arrival_time
     )
 
-    # Row 0: header (station left, route right).
-    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), WHITE)
+    # Row 0: header. Both the station name (left) and the route indicator
+    # (right) are tinted to the line's color.
+    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), line_color)
     matrix.draw_text_right(right_x, 0, route_label, line_color)
 
     if rows >= 7:

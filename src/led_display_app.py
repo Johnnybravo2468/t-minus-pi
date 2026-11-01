@@ -63,7 +63,7 @@ KEY_TO_EVENT = {
     "t": TOGGLE,
     "3": BUTTON_3,
 }
-KEY_HELP = "Keys: n=next, p=previous, t=toggle mode, 3=button3, q=quit"
+KEY_HELP = "Keys: n=next station, p=previous station, t=next line, 3=button3, q=quit"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -195,7 +195,7 @@ async def _run_interactive(args: argparse.Namespace) -> None:
             # InputController -> AppController -> StationManager chain.
             inputs.emit(event)
             await _render_current(client, display, manager)
-            print(f"  [{manager.mode.value}] {manager.current_station().name}")
+            print(f"  {manager.current_station().name}")
     finally:
         await client.aclose()
         display.clear()
