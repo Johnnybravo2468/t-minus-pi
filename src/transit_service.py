@@ -30,8 +30,13 @@ def _line_and_branch(route_id: Optional[str]) -> tuple[str, Optional[str]]:
     """
     if not route_id:
         return "", None
-    if route_id.startswith("Green-"):
-        return "Green Line", route_id.split("-", 1)[1]
+    if route_id.startswith("Green"):
+        # A combined route like "Green-B,Green-C,Green-D,Green-E" (trunk stop
+        # serving all branches) has no single branch.
+        if "," in route_id:
+            return "Green Line", None
+        branch = route_id.split("-", 1)[1] if "-" in route_id else None
+        return "Green Line", branch
     if route_id in {"Red", "Orange", "Blue"}:
         return f"{route_id} Line", None
     return route_id, None

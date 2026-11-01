@@ -35,11 +35,29 @@ async def build_all_line_stations(
     routes = await client.fetch_route_ids(types)
 
     stations: List[RouteConfig] = []
-    seen: set = set()  # (line_family, stop_id)
+    seen: set = set()  # (line_family, stop_id) for non-green lines
+
+    # Green branches (B/C/D/E) are combined so a trunk stop shows all branches'
+    # trains at once. Collect them separately, preserving first-seen stop order.
+    green_branches_by_stop: dict = {}
+    green_name_by_stop: dict = {}
+    green_stop_order: List[str] = []
+
     for route_id, long_name in routes:
-        family = _family_for_route(route_id)
         route_type = "commuter_rail" if route_id.startswith("CR-") else "subway"
         stops = await client.fetch_route_stops(route_id)
+
+        if route_id.startswith("Green-"):
+            for stop in stops:
+                stop_id = stop["id"]
+                if stop_id not in green_branches_by_stop:
+                    green_branches_by_stop[stop_id] = []
+                    green_name_by_stop[stop_id] = stop["name"]
+                    green_stop_order.append(stop_id)
+                green_branches_by_stop[stop_id].append(route_id)
+            continue
+
+        family = _family_for_route(route_id)
         for stop in stops:
             key = (family, stop["id"])
             if key in seen:
@@ -54,6 +72,20 @@ async def build_all_line_stations(
                     name=f"{stop['name']} - {long_name}",
                 )
             )
+
+    # One combined Green-Line station per stop (route_id lists all serving
+    # branches, e.g. "Green-B,Green-D"), so predictions include every branch.
+    for stop_id in green_stop_order:
+        branches = ",".join(green_branches_by_stop[stop_id])
+        stations.append(
+            RouteConfig(
+                id=f"Green:{stop_id}",
+                type="subway",
+                route_id=branches,
+                stop_id=stop_id,
+                name=f"{green_name_by_stop[stop_id]} - Green Line",
+            )
+        )
     return stations
 
 
