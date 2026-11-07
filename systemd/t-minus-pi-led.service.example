@@ -18,6 +18,12 @@ Type=simple
 # Root is required for GPIO access to drive the LED panels.
 User=root
 WorkingDirectory=/home/johnnybravo2468/t-minus-pi
+# The panel library runs a realtime thread. Keep it off CPU 0 and CPU 1,
+# which carry Wi-Fi, Ethernet, and SSH, so the link stays up.
+CPUAffinity=2 3
+# Onboard Wi-Fi drops more easily while the panels are refreshing if power
+# save is left on. Missing iw or wlan0 is ignored.
+ExecStartPre=-/bin/sh -c 'command -v iw >/dev/null && iw dev wlan0 set power_save off'
 ExecStart=/home/johnnybravo2468/t-minus-pi/.venv/bin/python -m src.led_display_app --gpio-mapping regular --all-lines
 Restart=always
 RestartSec=5

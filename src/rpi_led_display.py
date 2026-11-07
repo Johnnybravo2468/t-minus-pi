@@ -50,6 +50,10 @@ class RaspberryPiLEDDisplay:
         brightness: int = 60,
         hardware_mapping: str = "adafruit-hat",
         gpio_slowdown: int = 4,
+        # A departure board does not need the panels scanned as fast as the
+        # hardware can go. Capping the rate leaves quiet gaps so the Pi's
+        # onboard Wi-Fi can stay associated.
+        limit_refresh_hz: int = 100,
         drop_privileges: bool = True,
         use_emulator: bool = False,
         backend: Optional[Tuple[type, type]] = None,
@@ -69,6 +73,10 @@ class RaspberryPiLEDDisplay:
         # gpio_slowdown may not exist on every build; set defensively.
         try:
             options.gpio_slowdown = gpio_slowdown
+        except AttributeError:
+            pass
+        try:
+            options.limit_refresh_rate_hz = limit_refresh_hz
         except AttributeError:
             pass
         # By default the library drops root to the 'daemon' user after init for

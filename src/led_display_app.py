@@ -382,8 +382,29 @@ def _start_phone(args: argparse.Namespace, commands: queue.Queue) -> None:
         print("No network address found, so the phone page is not reachable yet.", flush=True)
 
 
+async def _wait_for_link(timeout: float = 40.0, pause: float = 1.0) -> bool:
+    """Let Wi-Fi finish connecting before the panels start.
+
+    The matrix refresh knocks the onboard radio off while it is still
+    associating. An existing route returns immediately. After ``timeout``
+    seconds the panels light anyway.
+    """
+    if has_default_route() is not False:
+        return True
+    print("Waiting for a network connection before lighting the panels.", flush=True)
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        await asyncio.sleep(pause)
+        if has_default_route() is not False:
+            print("Network is up.", flush=True)
+            return True
+    print("No network yet. Lighting the panels anyway.", flush=True)
+    return False
+
+
 async def _run_loop(args: argparse.Namespace) -> None:
     config = load_config()
+    await _wait_for_link()
     display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     manager = await _build_manager(args, config, client)
@@ -482,6 +503,7 @@ async def _interactive_loop(manager, inputs, interval: float, read_line, render)
 
 async def _run_interactive(args: argparse.Namespace) -> None:
     config = load_config()
+    await _wait_for_link()
     display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     manager = await _build_manager(args, config, client)

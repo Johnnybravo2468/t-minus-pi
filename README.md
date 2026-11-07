@@ -132,7 +132,14 @@ sudo systemctl enable --now t-minus-pi-led
 systemctl status t-minus-pi-led --no-pager
 ```
 
-The matrix refresh can disturb Wi-Fi. Ethernet from the Pi to the router has been the reliable link. The phone and the Pi have to be on the same network.
+The panel refresh is noisy and can knock the Pi's onboard Wi-Fi off the air. The service waits for a connection before lighting the panels, refreshes them slower, and keeps that work off the cores that handle the network. If the link still drops, plug the Pi into the router with Ethernet, then:
+
+```bash
+ssh johnnybravo2468@raspberrypi.local
+sudo systemctl stop t-minus-pi-led
+```
+
+Wait until `ping -c 3 192.168.0.1` works, then `sudo systemctl start t-minus-pi-led`. The phone and the Pi have to be on the same network.
 
 ### Notes for a later coding session
 
@@ -160,8 +167,10 @@ good board. Bus stops are BUS_STOPS in src/line_stations.py: 47 at Park Dr @
 Fenway Station (1807) and Brookline Ave @ The Fenway (1806), and 9 at Copley,
 Boylston St @ Dartmouth St (175). Bus names are white with the route number.
 
-Matrix refresh can disturb Wi-Fi. Ethernet from the Pi to the router has been
-the reliable link.
+The panel refresh can knock onboard Wi-Fi offline. The service waits for a
+route, caps the refresh, and pins the panels to CPUs 2 and 3. Ethernet from
+the Pi to the router is the fallback when Wi-Fi still drops. Stop the service
+before expecting Wi-Fi to return.
 ```
 
 ## Dashboard

@@ -180,6 +180,20 @@ def test_led_service_matches_this_pi():
         "-m src.led_display_app --gpio-mapping regular --all-lines"
     )
     assert "--interactive" not in start
+    assert "CPUAffinity=2 3" in text
+    assert "iw dev wlan0 set power_save off" in text
+
+
+def test_panels_wait_until_the_link_is_up(monkeypatch):
+    answers = iter([False, True])
+
+    monkeypatch.setattr(app, "has_default_route", lambda: next(answers))
+    assert asyncio.run(app._wait_for_link(timeout=5, pause=0)) is True
+
+
+def test_panels_light_when_the_link_stays_down(monkeypatch):
+    monkeypatch.setattr(app, "has_default_route", lambda: False)
+    assert asyncio.run(app._wait_for_link(timeout=0, pause=0)) is False
 
 
 def test_key_map_covers_all_buttons():

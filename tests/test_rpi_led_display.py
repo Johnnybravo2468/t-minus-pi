@@ -63,6 +63,8 @@ def test_options_configured_for_two_64x64_panels():
     assert opts.hardware_mapping == "adafruit-hat"  # default
     assert opts.parallel == 1
     assert opts.drop_privileges is True  # driver default matches library
+    assert opts.gpio_slowdown == 4
+    assert opts.limit_refresh_rate_hz == 100
     assert display.width == 128
     assert display.height == 64
 
