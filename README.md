@@ -1,6 +1,148 @@
 # t-minus-pi
 
-A lightweight Python application that fetches real-time MBTA transit data and renders a clean, glanceable web dashboard optimized for a Raspberry Pi display.
+The Raspberry Pi drives an LED departure board for the MBTA. A phone on the same network can change the station. The older HDMI dashboard is still in this repo and is described further down.
+
+## LED board
+
+Two chained 64x64 panels sit on an Adafruit Triple Bonnet on a Raspberry Pi 4. On boot, the `t-minus-pi-led` service starts the board as root, loads every subway line, and opens on Green-D Fenway. It asks the MBTA API for predictions and draws them about every 15 seconds. The phone page starts with the board.
+
+The pipeline is MBTA API, then `MBTAClient`, then `transit_service`, then `StationManager` for which stop is selected, then `render_station_board`, then `RaspberryPiLEDDisplay`. Phone taps enter through the same button events as the keyboard (`src/phone_control.py`, `src/app_controller.py`).
+
+### What the board shows
+
+The station name is drawn in that line's color. Every Green stop includes the branch being cycled, so Fenway reads `Fenway (D)` and the D copy of a trunk stop reads `Park Street (D)`. The clock in the top right is white, in 12-hour time. Below that are inbound and outbound departures.
+
+Green B, C, D, and E each cycle as their own line, the same way Red, Orange, and Blue do. Next and previous stay on the current line. A trunk Green stop is stored once per branch. Each copy lists every branch that serves it, so the board merges those trains.
+
+If a refresh fails, a short fault code appears under the station name and the last good departures stay up.
+
+| Code | Meaning |
+|---|---|
+| `NO LINK` | The Pi has no default route. |
+| `NO DNS` | A route exists, but `api-v3.mbta.com` does not resolve. |
+| `API DOWN` | The request times out, the connection fails, or the API returns a server error. |
+| `RATE LIMIT` | MBTA returns HTTP 429. |
+| `API KEY` | MBTA returns HTTP 401 or 403. |
+| `API ERROR` | Any other fetch failure. |
+
+A real empty schedule says `NO SERVICE` and leaves that row blank.
+
+Bus is a separate mode. The stops live in `BUS_STOPS` in `src/line_stations.py`. Add a line there to include another stop: route id, stop id, and the name to show.
+
+| Route | Stop | On the board |
+|---|---|---|
+| 47 | Park Dr @ Fenway Station (`1807`) | Park Dr at Fenway (47) |
+| 47 | Brookline Ave @ The Fenway (`1806`) | Brookline Ave at Fenway (47) |
+| 9 | Boylston St @ Dartmouth St, Copley (`175`) | Copley (9) |
+
+Bus names are white, with the route number at the end. Next and previous move along that route. Next route moves to the next bus route. Pressing Subway returns to the subway stop that was on screen.
+
+### Phone page
+
+While the service is running, join the phone to the same network as the Pi and open:
+
+```text
+http://t-minus-pi.local:8080
+```
+
+The page shows the stop that is on the board, the line in plain words (`Green D`, `Route 47`), and a fault code when a refresh fails. Subway and Bus switch modes. The other buttons are previous, next, and next line. In bus mode those read Previous stop, Next stop, and Next route.
+
+`t-minus-pi.local` is announced only while the program is running. If the phone cannot open that name, the numeric address printed at startup still works. On the Pi:
+
+```bash
+journalctl -u t-minus-pi-led -n 40 --no-pager
+```
+
+Look for `Phone controls:` or `Current address:`.
+
+### SSH, stop, and update
+
+From a computer on the same network, while the board is running:
+
+```bash
+ssh johnnybravo2468@t-minus-pi.local
+```
+
+If that name does not resolve, use the Pi's `192.168.0.x` address from the router, or `ssh johnnybravo2468@raspberrypi.local`. The account is `johnnybravo2468`. The repo is `/home/johnnybravo2468/t-minus-pi`.
+
+The display is the `t-minus-pi-led` service. Stopping it turns the panels off and takes the phone page down:
+
+```bash
+sudo systemctl stop t-minus-pi-led
+pgrep -af src.led_display_app
+```
+
+The second command should print nothing. A leftover copy is stopped with `sudo pkill -f src.led_display_app`.
+
+Start the board again:
+
+```bash
+sudo systemctl start t-minus-pi-led
+systemctl status t-minus-pi-led
+```
+
+To run it in the SSH session with the keyboard, leave the service stopped and use:
+
+```bash
+cd /home/johnnybravo2468/t-minus-pi
+sudo .venv/bin/python -m src.led_display_app --gpio-mapping regular --interactive --all-lines
+```
+
+Only one copy can drive the panels. After a keyboard session, press `Ctrl+C`, then `sudo systemctl start t-minus-pi-led` if boot startup should resume.
+
+`git checkout` does not refresh a branch that is already on the Pi. After new code is on `main`:
+
+```bash
+cd /home/johnnybravo2468/t-minus-pi
+sudo systemctl stop t-minus-pi-led
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+sudo systemctl start t-minus-pi-led
+```
+
+Install the boot service the first time, or reinstall it after the unit file changes:
+
+```bash
+cd /home/johnnybravo2468/t-minus-pi
+sudo cp systemd/t-minus-pi-led.service.example /etc/systemd/system/t-minus-pi-led.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now t-minus-pi-led
+```
+
+Turn boot startup off with `sudo systemctl disable --now t-minus-pi-led`.
+
+The matrix refresh can disturb Wi-Fi. Ethernet from the Pi to the router has been the reliable link. The phone and the Pi have to be on the same network.
+
+### Notes for a later coding session
+
+```text
+Project: Johnnybravo2468/t-minus-pi, branch main.
+Pi: user johnnybravo2468, repo /home/johnnybravo2468/t-minus-pi.
+Hardware: Raspberry Pi 4, two chained 64x64 panels, Adafruit Triple Bonnet.
+Always pass --gpio-mapping regular. Do not use user "pi" or /home/pi.
+
+The board is systemd unit t-minus-pi-led
+(systemd/t-minus-pi-led.service.example). It starts on boot as root, loads
+every subway line (--all-lines), opens on Green-D Fenway, and serves
+http://t-minus-pi.local:8080. The service does not use --interactive.
+Stop it with: sudo systemctl stop t-minus-pi-led
+Start it with: sudo systemctl start t-minus-pi-led
+Never run a second copy while the service is active.
+
+On the Pi, git checkout does not update an existing branch. Use git fetch
+and git pull --ff-only. Python is .venv/bin/python. An API key, if any, is in .env.
+
+Green B/C/D/E cycle as separate lines. Trunk stops are duplicated per branch
+and merge departures. Header is the colored station name. Green stops include
+the branch letter. The clock is white 12-hour time. Fault codes keep the last
+good board. Bus stops are BUS_STOPS in src/line_stations.py: 47 at Park Dr @
+Fenway Station (1807) and Brookline Ave @ The Fenway (1806), and 9 at Copley,
+Boylston St @ Dartmouth St (175). Bus names are white with the route number.
+
+Matrix refresh can disturb Wi-Fi. Ethernet from the Pi to the router has been
+the reliable link.
+```
 
 ## Dashboard
 
@@ -217,32 +359,6 @@ If you edit the installed service file, reload systemd before restarting:
 sudo systemctl daemon-reload
 sudo systemctl restart t-minus-pi
 sudo systemctl cat t-minus-pi
-```
-
-## LED display autostart
-
-The LED board can start on boot through `systemd/t-minus-pi-led.service.example`. The example is filled in for this Pi: user `johnnybravo2468`, project directory `/home/johnnybravo2468/t-minus-pi`, the Triple Bonnet GPIO mapping, and every subway line. The phone page starts with the board. The service does not use keyboard mode, because nothing is attached to the console at boot.
-
-Install and start it:
-
-```bash
-cd /home/johnnybravo2468/t-minus-pi
-sudo cp systemd/t-minus-pi-led.service.example /etc/systemd/system/t-minus-pi-led.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now t-minus-pi-led
-systemctl status t-minus-pi-led
-```
-
-Stop the board without removing the boot startup:
-
-```bash
-sudo systemctl stop t-minus-pi-led
-```
-
-Turn the boot startup off:
-
-```bash
-sudo systemctl disable --now t-minus-pi-led
 ```
 
 ## License
