@@ -132,19 +132,14 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
 def station_header_name(station) -> str:
     """Station name for the header.
 
-    A Green stop served by only one branch is labeled with that branch, so
-    Fenway reads ``Fenway (D)``. A trunk stop is served by several branches
-    and keeps the plain name, so Park Street stays ``Park Street``.
+    Every Green stop is labeled with the branch currently being cycled, so
+    Fenway reads ``Fenway (D)`` and the D copy of a trunk stop reads
+    ``Park Street (D)``. Switching to the B list at that same stop reads
+    ``Park Street (B)``. Other lines keep the plain station name.
     """
     plain = station.name.split(" - ")[0]
     family = _line_family(station)
-    route_id = station.route_id or ""
-    if (
-        family.startswith("GREEN-")
-        and len(family) == 7
-        and family[-1].isalpha()
-        and "," not in route_id
-    ):
+    if family.startswith("GREEN-") and len(family) == 7 and family[-1].isalpha():
         return f"{plain} ({family[-1]})"
     return plain
 

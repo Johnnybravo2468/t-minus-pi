@@ -56,7 +56,9 @@ def test_header_names_mark_branch_only_green_stops():
         name="Downtown Crossing - Red Line",
     )
     assert app.station_header_name(fenway) == "Fenway (D)"
-    assert app.station_header_name(park) == "Park Street"
+    assert app.station_header_name(park) == "Park Street (D)"
+    park_b = park.model_copy(update={"id": "Green-B:place-pktrm"})
+    assert app.station_header_name(park_b) == "Park Street (B)"
     assert app.station_header_name(red) == "Downtown Crossing"
 
 
