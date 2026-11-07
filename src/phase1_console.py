@@ -83,9 +83,11 @@ async def _run() -> None:
     config = load_config()
     client = MBTAClient(api_key=config.mbta_api_key)
     try:
-        departures = await fetch_station_departures(
-            client, FENWAY_GREEN_D, station_name="Fenway", max_per_direction=3
-        )
+        departures = (
+            await fetch_station_departures(
+                client, FENWAY_GREEN_D, station_name="Fenway", max_per_direction=3
+            )
+        ).departures
     finally:
         await client.aclose()
 

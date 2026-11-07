@@ -24,6 +24,14 @@ exactly where physical buttons will plug in later:
 
     python -m src.led_display_app --emulator --interactive
 
+Interactive mode still refreshes the station currently on screen every
+``--interval`` seconds. Keys only change which station that is.
+
+The same controls are served on the local network for a phone. The address
+does not change when the Pi's numeric address does:
+
+    http://t-minus-pi.local:8080
+
 Flags:
     --emulator        use RGBMatrixEmulator instead of real hardware
     --once            render a single frame and exit
@@ -31,18 +39,25 @@ Flags:
     --rotate          cycle to the next station on each refresh
     --interactive     control stations/mode from the keyboard
     --brightness N    panel brightness 1-100 (default 60)
+    --web-port N      phone button page port (default 8080)
+    --no-web          do not serve the phone button page
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import queue
+import threading
+from datetime import datetime
 from time import monotonic
 
 from src.app_controller import AppController
 from src.config import load_config
+from src.diagnostics import has_default_route, panel_status
 from src.display_encoder import compact_route_label
 from src.input_controller import (
+    BUS_MODE,
     BUTTON_3,
     NEXT_STATION,
     PREVIOUS_STATION,
@@ -50,11 +65,18 @@ from src.input_controller import (
     TOGGLE,
 )
 from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
-from src.line_stations import build_all_line_stations
+from src.line_stations import build_all_line_stations, build_bus_stations
 from src.mbta_client import MBTAClient
+from src.phone_control import (
+    PhoneControl,
+    advertise_stable_name,
+    phone_url,
+    preferred_lan_ip,
+    start_phone_server,
+)
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, _line_family, station_manager_from_config
-from src.transit_service import fetch_station_departures
+from src.transit_service import StationFetch, fetch_station_departures
 
 # Keyboard keys mapped to abstract input events (the same events physical
 # buttons will emit through a WirelessInputController later).
@@ -62,9 +84,14 @@ KEY_TO_EVENT = {
     "n": NEXT_STATION,
     "p": PREVIOUS_STATION,
     "t": TOGGLE,
+    "b": BUS_MODE,
     "3": BUTTON_3,
 }
-KEY_HELP = "Keys: n=next station, p=previous station, t=next line, 3=button3, q=quit"
+KEY_HELP = (
+    "Keys: n=next station, p=previous station, t=next line, b=bus routes, "
+    "3=button3, q=quit\n"
+    "The station on screen refreshes on its own. Keys only change the station."
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -95,15 +122,31 @@ def _parse_args() -> argparse.Namespace:
                         help="load every station on every subway line from the MBTA API")
     parser.add_argument("--include-commuter", action="store_true",
                         help="with --all-lines, also include commuter rail")
+    parser.add_argument("--web-port", type=int, default=8080,
+                        help="port for the phone button page")
+    parser.add_argument("--no-web", action="store_true",
+                        help="do not serve the phone button page")
     return parser.parse_args()
+
+
+# Green-D Fenway. Startup always lands here when that stop is in the list.
+FENWAY_STOP_ID = "place-fenwy"
+FENWAY_LINE = "GREEN-D"
+
+
+def _start_at_fenway(manager: StationManager) -> StationManager:
+    """Open on Fenway when it is loaded. Otherwise keep the first station."""
+    manager.select_stop(FENWAY_STOP_ID, FENWAY_LINE)
+    return manager
 
 
 async def _build_manager(args: argparse.Namespace, config, client: MBTAClient) -> StationManager:
     if args.all_lines:
         stations = await build_all_line_stations(client, include_commuter=args.include_commuter)
         if stations:
-            return StationManager(stations)
-    return station_manager_from_config(config)
+            return _start_at_fenway(StationManager(stations))
+    base = station_manager_from_config(config)
+    return _start_at_fenway(StationManager(list(base._stations) + build_bus_stations()))
 
 
 def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
@@ -119,16 +162,36 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
     )
 
 
-def route_label_for_station(station) -> str:
-    """Corner label for the line being cycled, e.g. ``GREEN B``.
+def station_header_name(station) -> str:
+    """Station name for the header.
 
-    Trunk stops fetch every Green branch, so the first departure no longer
-    tells you which branch's station list you are on. The station's line does.
+    Every Green stop is labeled with the branch currently being cycled, so
+    Fenway reads ``Fenway (D)`` and the D copy of a trunk stop reads
+    ``Park Street (D)``. Switching to the B list at that same stop reads
+    ``Park Street (B)``. Other lines keep the plain station name.
     """
     family = _line_family(station)
+    if family.startswith("BUS-"):
+        # Keep the full stop name. Bus stops can already contain " - ".
+        return f"{station.name} ({family.split('-', 1)[1]})"
+    plain = station.name.split(" - ")[0]
     if family.startswith("GREEN-") and len(family) == 7 and family[-1].isalpha():
-        return f"GREEN {family[-1]}"
-    return ""
+        return f"{plain} ({family[-1]})"
+    return plain
+
+
+def format_clock(now: datetime | None = None) -> str:
+    """12-hour local time for the header corner, e.g. ``1:05 PM``.
+
+    An aware ``now`` is shown in its own zone. When ``now`` is omitted, the
+    clock uses the Pi's local time.
+    """
+    current = now if now is not None else datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.astimezone()
+    hour = current.hour % 12 or 12
+    suffix = "AM" if current.hour < 12 else "PM"
+    return f"{hour}:{current.minute:02d} {suffix}"
 
 
 def build_board(
@@ -136,17 +199,33 @@ def build_board(
     station_name: str,
     departures,
     route_label: str = "",
+    status: str = "",
+    clock: str = "",
+    line_hint: str = "",
 ) -> PixelMatrix:
     matrix = PixelMatrix(display.width, display.height)
-    if not route_label and departures:
+    if not clock and not route_label and departures:
         route_label = compact_route_label(departures[0])
-    if departures:
+    # Bus stop names stay white. Rail names keep the line color.
+    if (line_hint or "").startswith("BUS"):
+        line_color = WHITE
+    elif departures:
         line_color = color_for_line(departures[0].line, departures[0].branch)
+    elif line_hint:
+        line_color = color_for_line(line_hint)
     elif route_label.startswith("GREEN"):
         line_color = color_for_line("Green Line")
     else:
         line_color = WHITE
-    render_station_board(matrix, station_name, route_label, departures, line_color=line_color)
+    render_station_board(
+        matrix,
+        station_name,
+        route_label,
+        departures,
+        line_color=line_color,
+        status=status,
+        clock=clock,
+    )
     return matrix
 
 
@@ -156,20 +235,46 @@ def build_board(
 # last good board if a refresh fails.
 CACHE_TTL_SECONDS = 10.0
 _DEPARTURE_CACHE: dict = {}
+# Fault code for the most recent refresh. Empty when the board is healthy.
+_LAST_STATUS = ""
+_PRINTED_STATUS: str | None = None
+# Phone page state. None until the local web server starts.
+_PHONE: PhoneControl | None = None
+
+
+def _set_status(status: str) -> None:
+    """Remember the code drawn on the panel, and print it once when it changes."""
+    global _LAST_STATUS, _PRINTED_STATUS
+    _LAST_STATUS = status
+    if status == _PRINTED_STATUS:
+        return
+    _PRINTED_STATUS = status
+    if status:
+        print(f"[diag] {status}", flush=True)
 
 
 async def _get_departures(client: MBTAClient, station, header_name: str):
     now = monotonic()
     cached = _DEPARTURE_CACHE.get(station.id)
     if cached and now - cached[0] < CACHE_TTL_SECONDS:
+        _set_status("")
         return cached[1]
-    departures = await fetch_station_departures(
+    fetched = await fetch_station_departures(
         client, station, station_name=header_name, max_per_direction=3
     )
+    # Tests and older callers may still return a bare list.
+    if isinstance(fetched, StationFetch):
+        departures = fetched.departures
+        error = fetched.error
+    else:
+        departures = fetched
+        error = None
     if departures:
         _DEPARTURE_CACHE[station.id] = (now, departures)
+        _set_status("")
         return departures
-    # Fetch returned nothing (e.g. rate-limited): reuse the last good board.
+    # A failed refresh keeps the last good board. The status row says why.
+    _set_status(panel_status(error, has_default_route()))
     return cached[1] if cached else departures
 
 
@@ -178,16 +283,51 @@ async def _render_current(
 ) -> None:
     """Fetch live data for the selected station and push it to the panel."""
     station = manager.current_station()
-    header_name = station.name.split(" - ")[0]
-    departures = await _get_departures(client, station, header_name)
+    header_name = station_header_name(station)
+    departures = await _get_departures(client, station, header_name.split(" (")[0])
     display.render(
         build_board(
             display,
             header_name,
             departures,
-            route_label=route_label_for_station(station),
+            status=_LAST_STATUS,
+            clock=format_clock(),
+            line_hint=_line_family(station),
         )
     )
+    _publish_phone(manager)
+
+
+def _publish_phone(manager: StationManager) -> None:
+    phone = _PHONE
+    if phone is None:
+        return
+    station = manager.current_station()
+    phone.update(
+        station_header_name(station),
+        manager.current_line(),
+        _LAST_STATUS,
+        manager.service_mode(),
+    )
+
+
+def _start_phone(args: argparse.Namespace, commands: queue.Queue) -> None:
+    """Serve the button page on the LAN and print the address a phone can open."""
+    global _PHONE
+    if args.no_web:
+        return
+    control = PhoneControl(commands)
+    server = start_phone_server(control, port=args.web_port)
+    if server is None:
+        return
+    _PHONE = control
+    ip = preferred_lan_ip()
+    announced = bool(ip) and advertise_stable_name(args.web_port, ip)
+    print(f"Phone controls: {phone_url(args.web_port)}", flush=True)
+    if ip and not announced:
+        print(f"Current address: http://{ip}:{args.web_port}", flush=True)
+    elif not ip:
+        print("No network address found, so the phone page is not reachable yet.", flush=True)
 
 
 async def _run_loop(args: argparse.Namespace) -> None:
@@ -195,17 +335,93 @@ async def _run_loop(args: argparse.Namespace) -> None:
     display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     manager = await _build_manager(args, config, client)
+    commands: queue.Queue = queue.Queue()
+    _start_phone(args, commands)
+    controller = AppController(manager)
+    inputs = SimulatedInputController()
+    controller.connect(inputs)
     try:
+        await _render_current(client, display, manager)
         while True:
-            await _render_current(client, display, manager)
             if args.once:
                 break
+            try:
+                line = await _read_command(commands, args.interval)
+            except EOFError:
+                break
+            if line:
+                action = apply_interactive_key(str(line).strip().lower(), inputs)
+                if action == "quit":
+                    break
+                if action != "unknown":
+                    await _render_current(client, display, manager)
+                continue
             if args.rotate:
                 manager.next_station()
-            await asyncio.sleep(args.interval)
+            await _render_current(client, display, manager)
     finally:
         await client.aclose()
         display.clear()
+
+
+def apply_interactive_key(key: str, inputs: SimulatedInputController) -> str:
+    """Apply one typed command. Returns ``quit``, ``unknown``, or ``ok``."""
+    if key == "q":
+        return "quit"
+    event = KEY_TO_EVENT.get(key)
+    if event is None:
+        return "unknown"
+    # A physical button press arrives the same way, via
+    # InputController -> AppController -> StationManager.
+    inputs.emit(event)
+    return "ok"
+
+
+def _spawn_command_reader(lines: queue.Queue) -> None:
+    """Read keyboard lines on a daemon thread so the panel can refresh meanwhile."""
+
+    def _read() -> None:
+        while True:
+            try:
+                lines.put(input("> "))
+            except (EOFError, KeyboardInterrupt):
+                lines.put(None)
+                return
+
+    threading.Thread(target=_read, name="led-keyboard", daemon=True).start()
+
+
+async def _read_command(lines: queue.Queue, interval: float):
+    """Return the next typed line, or None when ``interval`` seconds pass."""
+    try:
+        line = await asyncio.to_thread(lines.get, True, interval)
+    except queue.Empty:
+        return None
+    if line is None:
+        raise EOFError
+    return line
+
+
+async def _interactive_loop(manager, inputs, interval: float, read_line, render) -> None:
+    """Refresh the current station on a timer, and change it when a key arrives."""
+    print(KEY_HELP)
+    while True:
+        try:
+            line = await read_line(interval)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if line is None:
+            await render()
+            continue
+        action = apply_interactive_key(line.strip().lower(), inputs)
+        if action == "quit":
+            return
+        if action == "unknown":
+            print("  (unknown key)")
+            continue
+        await render()
+        print(f"  {manager.current_station().name}")
 
 
 async def _run_interactive(args: argparse.Namespace) -> None:
@@ -216,26 +432,19 @@ async def _run_interactive(args: argparse.Namespace) -> None:
     controller = AppController(manager)
     inputs = SimulatedInputController()
     controller.connect(inputs)
-    try:
+    commands: queue.Queue = queue.Queue()
+    _spawn_command_reader(commands)
+    _start_phone(args, commands)
+
+    async def read_line(interval: float):
+        return await _read_command(commands, interval)
+
+    async def render() -> None:
         await _render_current(client, display, manager)
-        print(KEY_HELP)
-        while True:
-            try:
-                key = input("> ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
-            if key == "q":
-                break
-            event = KEY_TO_EVENT.get(key)
-            if event is None:
-                print("  (unknown key)")
-                continue
-            # A physical button press would arrive the same way, via the
-            # InputController -> AppController -> StationManager chain.
-            inputs.emit(event)
-            await _render_current(client, display, manager)
-            print(f"  {manager.current_station().name}")
+
+    try:
+        await render()
+        await _interactive_loop(manager, inputs, args.interval, read_line, render)
     finally:
         await client.aclose()
         display.clear()

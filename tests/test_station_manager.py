@@ -53,6 +53,20 @@ def test_select_by_index_and_id():
     assert m.select_station(4).id == "b"  # index wraps (4 % 3 == 1)
 
 
+def test_select_stop_prefers_the_requested_line():
+    stations = [
+        RouteConfig(id="Red:place-fenwy", type="subway", route_id="Red", stop_id="place-fenwy", name="Not Fenway"),
+        RouteConfig(id="Green-B:place-pktrm", type="subway", route_id="Green-B", stop_id="place-pktrm", name="Park"),
+        RouteConfig(id="Green-D:place-fenwy", type="subway", route_id="Green-D", stop_id="place-fenwy", name="Fenway"),
+    ]
+    m = StationManager(stations)
+    assert m.current_station().id == "Red:place-fenwy"
+    assert m.select_stop("place-fenwy", "GREEN-D") is True
+    assert m.current_station().id == "Green-D:place-fenwy"
+    assert m.select_stop("place-missing", "GREEN-D") is False
+    assert m.current_station().id == "Green-D:place-fenwy"
+
+
 def test_select_unknown_id_raises():
     m = StationManager(_stations("a", "b"))
     with pytest.raises(ValueError):
@@ -104,6 +118,38 @@ def test_green_branches_cycle_as_separate_lines():
     assert m.current_line() == "GREEN-D"
     assert m.next_line().id == "Red:dtx"
     assert m.current_line() == "RED"
+
+
+def test_bus_button_switches_service_and_remembers_the_stop():
+    stations = _multiline() + [
+        RouteConfig(id="47:1807", type="bus", route_id="47", stop_id="1807", name="Park Dr at Fenway"),
+        RouteConfig(id="47:1806", type="bus", route_id="47", stop_id="1806", name="Brookline Ave at Fenway"),
+        RouteConfig(id="9:175", type="bus", route_id="9", stop_id="175", name="Copley"),
+    ]
+    m = StationManager(stations)
+    m.next_station()  # second Green-D stop
+    assert m.current_station().id == "g2"
+    assert m.switch_service().id == "47:1807"
+    assert m.service_mode() == "bus"
+    assert m.next_station().id == "47:1806"
+    assert m.next_line().id == "9:175"          # 47 -> 9, not back to the subway
+    assert m.current_line() == "BUS-9"
+    assert m.switch_service().id == "g2"        # back to the subway stop we left
+    assert m.service_mode() == "rail"
+    assert m.switch_service().id == "9:175"     # bus side remembers Copley
+
+
+def test_next_line_does_not_enter_bus_routes():
+    stations = _multiline() + [
+        RouteConfig(id="47:1807", type="bus", route_id="47", stop_id="1807", name="Park Dr"),
+    ]
+    m = StationManager(stations)
+    seen = []
+    for _ in range(6):
+        seen.append(m.current_line())
+        m.next_line()
+    assert seen[:4] == ["GREEN-D", "RED", "COMMUTER", "GREEN-D"]
+    assert "BUS-47" not in seen
 
 
 def test_next_station_stays_within_current_line():

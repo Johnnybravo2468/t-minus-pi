@@ -59,8 +59,9 @@ def _line_family(station: RouteConfig) -> str:
     """Group a station into the line used for cycling.
 
     Each Green branch is its own line (``GREEN-B``, ``GREEN-C``, ``GREEN-D``,
-    ``GREEN-E``), same as Red, Orange, and Blue. Other routes stay one family
-    each: ``RED``, ``ORANGE``, ``BLUE``, ``COMMUTER``.
+    ``GREEN-E``), same as Red, Orange, and Blue. Each bus route is its own
+    line (``BUS-47``). Other routes stay one family each: ``RED``, ``ORANGE``,
+    ``BLUE``, ``COMMUTER``.
     """
     green = _green_branch_family(station)
     if green:
@@ -69,9 +70,17 @@ def _line_family(station: RouteConfig) -> str:
     for family in ("RED", "ORANGE", "BLUE"):
         if route_id.startswith(family):
             return family
+    if (station.type or "").lower() == "bus":
+        route = (station.route_id or "").split(",")[0].strip()
+        return f"BUS-{route}" if route else "BUS"
     if route_id.startswith("CR-"):
         return "COMMUTER"
     return route_id or (station.type or "").upper()
+
+
+def _service_mode(station: RouteConfig) -> str:
+    """``bus`` for a bus route, ``rail`` for subway and commuter stops."""
+    return "bus" if _line_family(station).startswith("BUS-") else "rail"
 
 
 def _green_d_station(station_id: str, name: str, stop_id: str) -> RouteConfig:
@@ -111,6 +120,9 @@ class StationManager:
         self._stations: List[RouteConfig] = list(stations)
         self._index: int = 0
         self._mode: DisplayMode = mode
+        # Last selection on the other service, so the bus button can return
+        # to the subway stop that was on screen.
+        self._mode_index: dict = {"rail": None, "bus": None}
 
     # --- selection state ---------------------------------------------------
 
@@ -150,22 +162,36 @@ class StationManager:
         """The line of the currently selected station (e.g. 'GREEN-D' or 'RED')."""
         return _line_family(self.current_station())
 
-    def _line_order(self) -> List[str]:
-        """Distinct line families in configured order."""
+    def service_mode(self) -> str:
+        """``rail`` or ``bus``, whichever list is on screen."""
+        return _service_mode(self.current_station())
+
+    def _line_order(self, mode: Optional[str] = None) -> List[str]:
+        """Distinct line families in configured order.
+
+        ``mode`` keeps subway cycling inside the rail list and bus cycling
+        inside the bus list.
+        """
         order: List[str] = []
         for station in self._stations:
+            if mode is not None and _service_mode(station) != mode:
+                continue
             family = _line_family(station)
             if family not in order:
                 order.append(family)
         return order
 
+    def _indices_for_mode(self, mode: str) -> List[int]:
+        return [i for i, station in enumerate(self._stations) if _service_mode(station) == mode]
+
     def next_line(self) -> RouteConfig:
         """Jump to the first station of the next line family (wraps around).
 
         If only one line is configured, this is a no-op. This is what the
-        dedicated toggle button drives.
+        dedicated toggle button drives. Subway lines and bus routes stay in
+        separate cycles; the bus button moves between those cycles.
         """
-        families = self._line_order()
+        families = self._line_order(self.service_mode())
         if len(families) <= 1:
             return self.current_station()
         current = self.current_line()
@@ -174,6 +200,22 @@ class StationManager:
             if _line_family(station) == next_family:
                 self._index = i
                 break
+        return self.current_station()
+
+    def switch_service(self) -> RouteConfig:
+        """Swap between the subway lines and the bus routes.
+
+        Each side remembers the stop that was selected, so a second press
+        returns to it. With no bus routes loaded, the selection stays put.
+        """
+        current = self.service_mode()
+        self._mode_index[current] = self._index
+        target = "rail" if current == "bus" else "bus"
+        indices = self._indices_for_mode(target)
+        if not indices:
+            return self.current_station()
+        saved = self._mode_index.get(target)
+        self._index = saved if saved in indices else indices[0]
         return self.current_station()
 
     def select_station(self, station: Union[int, str]) -> RouteConfig:
@@ -192,6 +234,22 @@ class StationManager:
                 self._index = i
                 return self.current_station()
         raise ValueError(f"No station with id {station!r}")
+
+    def select_stop(self, stop_id: str, line: Optional[str] = None) -> bool:
+        """Select the first station with this MBTA stop id.
+
+        ``line`` limits the match to one family, such as ``GREEN-D``, so a
+        trunk stop that exists on several branches does not pick the wrong copy.
+        Returns False when nothing matches and leaves the current selection.
+        """
+        for i, station in enumerate(self._stations):
+            if station.stop_id != stop_id:
+                continue
+            if line is not None and _line_family(station) != line:
+                continue
+            self._index = i
+            return True
+        return False
 
     # --- display mode ------------------------------------------------------
 

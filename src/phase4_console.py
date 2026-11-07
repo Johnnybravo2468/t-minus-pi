@@ -81,9 +81,11 @@ async def _render_current(
     display: SimulatedLEDDisplay,
 ) -> None:
     station = manager.current_station()
-    departures = await fetch_station_departures(
-        client, station, station_name=station.name, max_per_direction=2
-    )
+    departures = (
+        await fetch_station_departures(
+            client, station, station_name=station.name, max_per_direction=2
+        )
+    ).departures
     header_name = station.name.split(" - ")[0]
     display.render(encoder.encode(header_name, departures))
 

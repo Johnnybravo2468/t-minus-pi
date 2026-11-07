@@ -10,7 +10,7 @@ line, so the toggle button cycles lines and next/previous move within a line.
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional, Sequence, Tuple
 
 from src.config import RouteConfig
 from src.mbta_client import MBTAClient
@@ -20,6 +20,15 @@ from src.station_manager import _line_family
 # (Red/Orange/Blue), 2 = commuter rail.
 SUBWAY_TYPES = "0,1"
 SUBWAY_AND_COMMUTER_TYPES = "0,1,2"
+
+# Stops shown by the bus button. Each entry is (route id, stop id, board name).
+# Stops that share a route cycle together, and each route is its own line.
+# Add another entry here to include another stop.
+BUS_STOPS: List[Tuple[str, str, str]] = [
+    ("47", "1807", "Park Dr at Fenway"),       # Park Dr @ Fenway Station
+    ("47", "1806", "Brookline Ave at Fenway"),  # Brookline Ave @ The Fenway
+    ("9", "175", "Copley"),                     # Boylston St @ Dartmouth St
+]
 
 
 async def build_all_line_stations(
@@ -96,7 +105,28 @@ async def build_all_line_stations(
                     name=f"{stop['name']} - {long_name}",
                 )
             )
+    stations.extend(build_bus_stations())
     return stations
+
+
+def build_bus_stations(
+    stops: Optional[Sequence[Tuple[str, str, str]]] = None,
+) -> List[RouteConfig]:
+    """The chosen bus stops, in the order they should cycle.
+
+    ``stops`` defaults to :data:`BUS_STOPS`. Each route id becomes its own line.
+    """
+    chosen = list(BUS_STOPS if stops is None else stops)
+    return [
+        RouteConfig(
+            id=f"{route_id}:{stop_id}",
+            type="bus",
+            route_id=str(route_id),
+            stop_id=str(stop_id),
+            name=name,
+        )
+        for route_id, stop_id, name in chosen
+    ]
 
 
 def _family_for_route(route_id: str) -> str:

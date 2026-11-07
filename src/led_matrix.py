@@ -132,9 +132,26 @@ def _abbreviate(text: str, max_chars: int) -> str:
     text = text.upper()
     for full, short in _ABBREVIATIONS.items():
         text = text.replace(full, short)
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars]
+    suffix = ""
+    if text.endswith(")") and " (" in text:
+        name, _, tail = text.rpartition(" (")
+        # Keep a short route marker such as " (D)" or " (47)" on the header.
+        if tail.endswith(")") and len(tail) <= 6 and name:
+            suffix = f" ({tail}"
+            text = name
+    if len(text) + len(suffix) <= max_chars:
+        return text + suffix
+    room = max_chars - len(suffix)
+    if room < 1:
+        return (text + suffix)[:max_chars]
+    return text[:room].rstrip() + suffix
+
+
+def _status_color(status: str) -> RGB:
+    """Amber for a degraded-but-showing board, red when data cannot be reached."""
+    if status == "RATE LIMIT":
+        return AMBER
+    return RED
 
 
 def render_station_board(
@@ -143,6 +160,8 @@ def render_station_board(
     route_label: str,
     departures: List[Departure],
     line_color: RGB = GREEN,
+    status: str = "",
+    clock: str = "",
 ) -> None:
     """Lay out a station board onto the matrix, adapting to the panel size.
 
@@ -162,10 +181,19 @@ def render_station_board(
         [d for d in departures if d.direction == "Outbound"], key=lambda d: d.arrival_time
     )
 
-    # Row 0: header. Both the station name (left) and the route indicator
-    # (right) are tinted to the line's color.
-    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), line_color)
-    matrix.draw_text_right(right_x, 0, route_label, line_color)
+    # Row 0: station name in the line color. A clock, when given, replaces the
+    # route label and is drawn in white. Otherwise the route label stays.
+    right_text = clock or route_label
+    right_color = WHITE if clock else line_color
+    name_cols = cols - len(right_text) - (1 if right_text else 0)
+    matrix.draw_text(0, 0, _abbreviate(station_name, max(name_cols, 1)), line_color)
+    if right_text:
+        matrix.draw_text_right(right_x, 0, right_text, right_color)
+
+    # Tall panels leave row 1 blank between the header and the sections.
+    # A fault code goes there. Short panels use that row for a departure.
+    if status and rows >= 7:
+        matrix.draw_text(0, CELL_HEIGHT, _abbreviate(status, cols), _status_color(status))
 
     if rows >= 7:
         _render_sections(matrix, cols, rows, right_x, inbound, outbound, line_color)
