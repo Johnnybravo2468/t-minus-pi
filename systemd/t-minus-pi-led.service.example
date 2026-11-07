@@ -1,0 +1,28 @@
+# t-minus-pi LED matrix display - systemd service (example)
+#
+# Starts the LED board on boot and restarts it if it crashes. The phone page
+# comes up with it at http://t-minus-pi.local:8080. There is no keyboard on a
+# boot, so this does not pass --interactive; the phone buttons are the control.
+#
+# Driving the panels needs root for GPIO. The paths below match this Pi:
+#   /home/johnnybravo2468/t-minus-pi
+# For the Adafruit Triple Bonnet, keep "--gpio-mapping regular".
+
+[Unit]
+Description=t-minus-pi LED Matrix Transit Display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Root is required for GPIO access to drive the LED panels.
+User=root
+WorkingDirectory=/home/johnnybravo2468/t-minus-pi
+ExecStart=/home/johnnybravo2468/t-minus-pi/.venv/bin/python -m src.led_display_app --gpio-mapping regular --all-lines
+Restart=always
+RestartSec=5
+# Loads MBTA_API_KEY when the file exists. The leading '-' makes it optional.
+EnvironmentFile=-/home/johnnybravo2468/t-minus-pi/.env
+
+[Install]
+WantedBy=multi-user.target

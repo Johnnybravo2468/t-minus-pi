@@ -219,6 +219,32 @@ sudo systemctl restart t-minus-pi
 sudo systemctl cat t-minus-pi
 ```
 
+## LED display autostart
+
+The LED board can start on boot through `systemd/t-minus-pi-led.service.example`. The example is filled in for this Pi: user `johnnybravo2468`, project directory `/home/johnnybravo2468/t-minus-pi`, the Triple Bonnet GPIO mapping, and every subway line. The phone page starts with the board. The service does not use keyboard mode, because nothing is attached to the console at boot.
+
+Install and start it:
+
+```bash
+cd /home/johnnybravo2468/t-minus-pi
+sudo cp systemd/t-minus-pi-led.service.example /etc/systemd/system/t-minus-pi-led.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now t-minus-pi-led
+systemctl status t-minus-pi-led
+```
+
+Stop the board without removing the boot startup:
+
+```bash
+sudo systemctl stop t-minus-pi-led
+```
+
+Turn the boot startup off:
+
+```bash
+sudo systemctl disable --now t-minus-pi-led
+```
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

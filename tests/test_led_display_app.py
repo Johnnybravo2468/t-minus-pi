@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import src.led_display_app as app
@@ -129,6 +130,20 @@ def test_route_number_survives_a_narrow_header():
     assert _abbreviate("Brookline Ave at Fenway (47)", 13) == "BROOKLIN (47)"
     assert _abbreviate("Copley (9)", 13) == "COPLEY (9)"
     assert _abbreviate("Fenway (D)", 13) == "FENWAY (D)"
+
+
+def test_led_service_matches_this_pi():
+    text = (
+        Path(__file__).resolve().parents[1] / "systemd" / "t-minus-pi-led.service.example"
+    ).read_text(encoding="utf-8")
+    assert "User=root" in text
+    assert "WorkingDirectory=/home/johnnybravo2468/t-minus-pi" in text
+    start = next(line for line in text.splitlines() if line.startswith("ExecStart="))
+    assert start == (
+        "ExecStart=/home/johnnybravo2468/t-minus-pi/.venv/bin/python "
+        "-m src.led_display_app --gpio-mapping regular --all-lines"
+    )
+    assert "--interactive" not in start
 
 
 def test_key_map_covers_all_buttons():
