@@ -1,7 +1,8 @@
 """Phone controls for the LED board on the local network.
 
-A small web page has the same buttons as the keyboard: previous station, next
-station, and next line. While the program is running the page answers at one
+A small web page has the same buttons as the keyboard: previous, next, and
+next line, plus a subway/bus switch. The labels follow whichever mode is on
+screen. While the program is running the page answers at one
 fixed name, ``http://t-minus-pi.local:8080``, even when the Pi's numeric
 address changes. Any phone on the same network can open it. Nothing here is
 exposed beyond that network by itself.
@@ -35,37 +36,57 @@ PAGE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>t-minus-pi</title>
   <style>
-    body { margin: 0; background: #111; color: #f2f2f2;
+    body { margin: 0; background: #111; color: #f4f4f4;
            font-family: system-ui, sans-serif; }
-    header { padding: 1.25rem 1rem 0.25rem; }
-    h1 { font-size: 1.7rem; margin: 0; }
-    p { margin: 0.4rem 0 0; color: #9ad; min-height: 1.2em; }
-    .fault { color: #f80; }
-    button { display: block; width: calc(100% - 2rem); margin: 0.75rem 1rem;
+    header { padding: 1.4rem 1.1rem 0.2rem; }
+    .eyebrow { margin: 0; color: #8d8d8d; font-size: 0.85rem; letter-spacing: 0.08em;
+               text-transform: uppercase; }
+    h1 { font-size: 2rem; line-height: 1.15; margin: 0.35rem 0 0; }
+    #detail { margin: 0.45rem 0 0; color: #9ad; font-size: 1.15rem; min-height: 1.3em; }
+    #status { margin: 0.25rem 0 0; color: #f80; min-height: 1.2em; font-weight: 600; }
+    .modes { display: flex; gap: 0.6rem; margin: 1.1rem 1rem 0.4rem; }
+    .modes button { flex: 1; margin: 0; background: #1c1c1c; color: #cfcfcf; }
+    .modes button.active { background: #0b7a4b; color: white; }
+    body.bus .modes button.active { background: #ececec; color: #161616; }
+    button { display: block; width: calc(100% - 2rem); margin: 0.7rem 1rem;
              padding: 1.15rem; font-size: 1.35rem; border: 0; border-radius: 14px;
              background: #2a2a2a; color: white; }
     button.primary { background: #0b7a4b; }
+    body.bus button.primary { background: #ececec; color: #161616; }
   </style>
 </head>
 <body>
   <header>
+    <p class="eyebrow">t-minus-pi</p>
     <h1 id="station">Loading…</h1>
     <p id="detail"></p>
+    <p id="status"></p>
   </header>
-  <button type="button" onclick="act('p')">Previous station</button>
-  <button class="primary" type="button" onclick="act('n')">Next station</button>
-  <button type="button" onclick="act('t')">Next line</button>
-  <button type="button" id="mode" onclick="act('b')">Bus routes</button>
+  <div class="modes">
+    <button type="button" id="subway" class="active" onclick="choose('rail')">Subway</button>
+    <button type="button" id="bus" onclick="choose('bus')">Bus</button>
+  </div>
+  <button type="button" id="prev" onclick="act('p')">Previous station</button>
+  <button class="primary" type="button" id="next" onclick="act('n')">Next station</button>
+  <button type="button" id="line" onclick="act('t')">Next line</button>
   <script>
+    let currentMode = "rail";
+    function paint(state) {
+      const bus = state.mode === "bus";
+      currentMode = bus ? "bus" : "rail";
+      document.body.className = bus ? "bus" : "";
+      document.getElementById("station").textContent = state.name || "…";
+      document.getElementById("detail").textContent = state.label || state.line || "";
+      document.getElementById("status").textContent = state.status || "";
+      document.getElementById("subway").className = bus ? "" : "active";
+      document.getElementById("bus").className = bus ? "active" : "";
+      document.getElementById("prev").textContent = bus ? "Previous stop" : "Previous station";
+      document.getElementById("next").textContent = bus ? "Next stop" : "Next station";
+      document.getElementById("line").textContent = bus ? "Next route" : "Next line";
+    }
     async function refresh() {
       const response = await fetch("/api/state");
-      const state = await response.json();
-      document.getElementById("station").textContent = state.name || "…";
-      const detail = document.getElementById("detail");
-      detail.textContent = state.status || state.line || "";
-      detail.className = state.status ? "fault" : "";
-      const mode = document.getElementById("mode");
-      mode.textContent = state.mode === "bus" ? "Subway" : "Bus routes";
+      paint(await response.json());
     }
     async function act(key) {
       await fetch("/api/action", {
@@ -76,12 +97,32 @@ PAGE = """<!DOCTYPE html>
       setTimeout(refresh, 400);
       setTimeout(refresh, 1200);
     }
+    function choose(mode) {
+      if (mode !== currentMode) act("b");
+    }
     refresh();
     setInterval(refresh, 2000);
   </script>
 </body>
 </html>
 """
+
+
+def line_label(line: str, mode: str = "rail") -> str:
+    """Short name for the phone, such as ``Green D`` or ``Route 47``."""
+    text = (line or "").upper()
+    if mode == "bus" or text.startswith("BUS-") or text == "BUS":
+        number = text.split("-", 1)[1] if "-" in text else ""
+        return f"Route {number}" if number else "Bus"
+    if text.startswith("GREEN-") and len(text) == 7 and text[-1].isalpha():
+        return f"Green {text[-1]}"
+    names = {
+        "RED": "Red Line",
+        "ORANGE": "Orange Line",
+        "BLUE": "Blue Line",
+        "COMMUTER": "Commuter rail",
+    }
+    return names.get(text, line)
 
 
 class PhoneControl:
@@ -107,6 +148,7 @@ class PhoneControl:
             return {
                 "name": self.name,
                 "line": self.line,
+                "label": line_label(self.line, self.mode),
                 "status": self.status,
                 "mode": self.mode,
             }

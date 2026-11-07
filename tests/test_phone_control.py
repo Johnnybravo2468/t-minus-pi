@@ -10,6 +10,7 @@ import pytest
 
 from src.phone_control import (
     PhoneControl,
+    line_label,
     phone_url,
     preferred_lan_ip,
     start_phone_server,
@@ -37,6 +38,16 @@ def test_avahi_command_uses_the_fixed_name(monkeypatch):
         "t-minus-pi.local",
         "192.168.0.23",
     ]
+
+
+def test_line_label_reads_as_a_person_would():
+    assert line_label("GREEN-D") == "Green D"
+    assert line_label("RED") == "Red Line"
+    assert line_label("ORANGE") == "Orange Line"
+    assert line_label("BLUE") == "Blue Line"
+    assert line_label("COMMUTER") == "Commuter rail"
+    assert line_label("BUS-47", "bus") == "Route 47"
+    assert line_label("BUS-9", "bus") == "Route 9"
 
 
 def test_phone_url_stays_fixed():
@@ -78,13 +89,15 @@ def test_phone_page_serves_buttons_and_queues_them():
         assert "Next station" in page
         assert "Previous station" in page
         assert "Next line" in page
-        assert "Bus routes" in page
+        assert "Subway" in page
+        assert "Bus" in page
 
         with urllib.request.urlopen(base + "/api/state") as response:
             state = json.loads(response.read().decode("utf-8"))
         assert state == {
             "name": "Fenway (D)",
             "line": "GREEN-D",
+            "label": "Green D",
             "status": "NO LINK",
             "mode": "rail",
         }
