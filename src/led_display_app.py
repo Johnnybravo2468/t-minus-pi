@@ -24,6 +24,9 @@ exactly where physical buttons will plug in later:
 
     python -m src.led_display_app --emulator --interactive
 
+Interactive mode still refreshes the station currently on screen every
+``--interval`` seconds. Keys only change which station that is.
+
 Flags:
     --emulator        use RGBMatrixEmulator instead of real hardware
     --once            render a single frame and exit
@@ -37,6 +40,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import queue
+import threading
 from time import monotonic
 
 from src.app_controller import AppController
@@ -65,7 +70,10 @@ KEY_TO_EVENT = {
     "t": TOGGLE,
     "3": BUTTON_3,
 }
-KEY_HELP = "Keys: n=next station, p=previous station, t=next line, 3=button3, q=quit"
+KEY_HELP = (
+    "Keys: n=next station, p=previous station, t=next line, 3=button3, q=quit\n"
+    "The station on screen refreshes on its own. Keys only change the station."
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -242,6 +250,68 @@ async def _run_loop(args: argparse.Namespace) -> None:
         display.clear()
 
 
+def apply_interactive_key(key: str, inputs: SimulatedInputController) -> str:
+    """Apply one typed command. Returns ``quit``, ``unknown``, or ``ok``."""
+    if key == "q":
+        return "quit"
+    event = KEY_TO_EVENT.get(key)
+    if event is None:
+        return "unknown"
+    # A physical button press arrives the same way, via
+    # InputController -> AppController -> StationManager.
+    inputs.emit(event)
+    return "ok"
+
+
+def _spawn_command_reader() -> queue.Queue:
+    """Read keyboard lines on a daemon thread so the panel can refresh meanwhile."""
+    lines: queue.Queue = queue.Queue()
+
+    def _read() -> None:
+        while True:
+            try:
+                lines.put(input("> "))
+            except (EOFError, KeyboardInterrupt):
+                lines.put(None)
+                return
+
+    threading.Thread(target=_read, name="led-keyboard", daemon=True).start()
+    return lines
+
+
+async def _read_command(lines: queue.Queue, interval: float):
+    """Return the next typed line, or None when ``interval`` seconds pass."""
+    try:
+        line = await asyncio.to_thread(lines.get, True, interval)
+    except queue.Empty:
+        return None
+    if line is None:
+        raise EOFError
+    return line
+
+
+async def _interactive_loop(manager, inputs, interval: float, read_line, render) -> None:
+    """Refresh the current station on a timer, and change it when a key arrives."""
+    print(KEY_HELP)
+    while True:
+        try:
+            line = await read_line(interval)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if line is None:
+            await render()
+            continue
+        action = apply_interactive_key(line.strip().lower(), inputs)
+        if action == "quit":
+            return
+        if action == "unknown":
+            print("  (unknown key)")
+            continue
+        await render()
+        print(f"  {manager.current_station().name}")
+
+
 async def _run_interactive(args: argparse.Namespace) -> None:
     config = load_config()
     display = _make_display(args)
@@ -250,26 +320,17 @@ async def _run_interactive(args: argparse.Namespace) -> None:
     controller = AppController(manager)
     inputs = SimulatedInputController()
     controller.connect(inputs)
-    try:
+    commands = _spawn_command_reader()
+
+    async def read_line(interval: float):
+        return await _read_command(commands, interval)
+
+    async def render() -> None:
         await _render_current(client, display, manager)
-        print(KEY_HELP)
-        while True:
-            try:
-                key = input("> ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
-            if key == "q":
-                break
-            event = KEY_TO_EVENT.get(key)
-            if event is None:
-                print("  (unknown key)")
-                continue
-            # A physical button press would arrive the same way, via the
-            # InputController -> AppController -> StationManager chain.
-            inputs.emit(event)
-            await _render_current(client, display, manager)
-            print(f"  {manager.current_station().name}")
+
+    try:
+        await render()
+        await _interactive_loop(manager, inputs, args.interval, read_line, render)
     finally:
         await client.aclose()
         display.clear()

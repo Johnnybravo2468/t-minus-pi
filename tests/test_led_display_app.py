@@ -4,8 +4,16 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import src.led_display_app as app
+from src.app_controller import AppController
 from src.config import RouteConfig
-from src.input_controller import BUTTON_3, NEXT_STATION, PREVIOUS_STATION, TOGGLE
+from src.input_controller import (
+    BUTTON_3,
+    NEXT_STATION,
+    PREVIOUS_STATION,
+    SimulatedInputController,
+    TOGGLE,
+)
+from src.station_manager import StationManager
 from src.led_display_app import KEY_TO_EVENT, _make_display, _parse_args, build_board
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.transit_model import Departure
@@ -156,3 +164,27 @@ def test_failed_refresh_names_the_fault_and_keeps_the_board(monkeypatch):
     assert first == good
     assert second == good
     assert app._LAST_STATUS == "NO DNS"
+
+
+def test_interactive_refresh_keeps_the_current_station():
+    stations = [
+        RouteConfig(id="a", type="subway", route_id="Red", stop_id="s1", name="Alpha"),
+        RouteConfig(id="b", type="subway", route_id="Red", stop_id="s2", name="Beta"),
+    ]
+    manager = StationManager(stations)
+    inputs = SimulatedInputController()
+    AppController(manager).connect(inputs)
+    script = [None, "n", None, "q"]
+
+    async def read_line(interval):
+        return script.pop(0)
+
+    rendered = []
+
+    async def render():
+        rendered.append(manager.current_station().id)
+
+    asyncio.run(app._interactive_loop(manager, inputs, 15, read_line, render))
+    # Timeout refreshes Alpha. "n" moves to Beta. The next timeout stays on Beta.
+    assert rendered == ["a", "b", "b"]
+    assert manager.current_station().id == "b"
