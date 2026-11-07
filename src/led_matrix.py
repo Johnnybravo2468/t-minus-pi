@@ -151,6 +151,7 @@ def render_station_board(
     departures: List[Departure],
     line_color: RGB = GREEN,
     status: str = "",
+    clock: str = "",
 ) -> None:
     """Lay out a station board onto the matrix, adapting to the panel size.
 
@@ -170,10 +171,14 @@ def render_station_board(
         [d for d in departures if d.direction == "Outbound"], key=lambda d: d.arrival_time
     )
 
-    # Row 0: header. Both the station name (left) and the route indicator
-    # (right) are tinted to the line's color.
-    matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), line_color)
-    matrix.draw_text_right(right_x, 0, route_label, line_color)
+    # Row 0: station name in the line color. A clock, when given, replaces the
+    # route label and is drawn in white. Otherwise the route label stays.
+    right_text = clock or route_label
+    right_color = WHITE if clock else line_color
+    name_cols = cols - len(right_text) - (1 if right_text else 0)
+    matrix.draw_text(0, 0, _abbreviate(station_name, max(name_cols, 1)), line_color)
+    if right_text:
+        matrix.draw_text_right(right_x, 0, right_text, right_color)
 
     # Tall panels leave row 1 blank between the header and the sections.
     # A fault code goes there. Short panels use that row for a departure.

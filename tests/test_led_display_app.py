@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import src.led_display_app as app
 from src.app_controller import AppController
@@ -15,6 +16,7 @@ from src.input_controller import (
 )
 from src.station_manager import StationManager
 from src.led_display_app import KEY_TO_EVENT, _make_display, _parse_args, build_board
+from src.led_matrix import GREEN, WHITE, PixelMatrix, render_station_board
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.transit_model import Departure
 from src.transit_service import StationFetch
@@ -29,6 +31,60 @@ def _departures():
         Departure("Fenway", "Green Line", "Green Line (D)", "Outbound",
                   "Riverside", now + timedelta(minutes=7), branch="D"),
     ]
+
+
+def test_header_names_mark_branch_only_green_stops():
+    fenway = RouteConfig(
+        id="Green-D:place-fenwy",
+        type="subway",
+        route_id="Green-D",
+        stop_id="place-fenwy",
+        name="Fenway - Green Line D",
+    )
+    park = RouteConfig(
+        id="Green-D:place-pktrm",
+        type="subway",
+        route_id="Green-B,Green-C,Green-D,Green-E",
+        stop_id="place-pktrm",
+        name="Park Street - Green Line D",
+    )
+    red = RouteConfig(
+        id="Red:place-dwnxg",
+        type="subway",
+        route_id="Red",
+        stop_id="place-dwnxg",
+        name="Downtown Crossing - Red Line",
+    )
+    assert app.station_header_name(fenway) == "Fenway (D)"
+    assert app.station_header_name(park) == "Park Street"
+    assert app.station_header_name(red) == "Downtown Crossing"
+
+
+def test_format_clock_uses_the_given_zone():
+    eastern = datetime(2026, 11, 7, 13, 5, tzinfo=ZoneInfo("America/New_York"))
+    assert app.format_clock(eastern) == "1:05 PM"
+
+
+def test_clock_is_white_and_replaces_the_line_label():
+    now = datetime.now(timezone.utc)
+    departures = [
+        Departure(
+            "Fenway", "Green Line", "Green Line (D)", "Inbound",
+            "Union Square", now + timedelta(minutes=3), branch="D",
+        ),
+    ]
+    matrix = PixelMatrix(128, 64)
+    render_station_board(
+        matrix, "Fenway (D)", "", departures, line_color=GREEN, clock="1:05 PM",
+    )
+    header = [
+        matrix.get_pixel(x, y)
+        for y in range(7)
+        for x in range(matrix.width)
+        if matrix.get_pixel(x, y) is not None
+    ]
+    assert GREEN in header
+    assert WHITE in header
 
 
 def test_key_map_covers_all_buttons():

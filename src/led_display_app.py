@@ -42,6 +42,7 @@ import argparse
 import asyncio
 import queue
 import threading
+from datetime import datetime
 from time import monotonic
 
 from src.app_controller import AppController
@@ -128,16 +129,38 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
     )
 
 
-def route_label_for_station(station) -> str:
-    """Corner label for the line being cycled, e.g. ``GREEN B``.
+def station_header_name(station) -> str:
+    """Station name for the header.
 
-    Trunk stops fetch every Green branch, so the first departure no longer
-    tells you which branch's station list you are on. The station's line does.
+    A Green stop served by only one branch is labeled with that branch, so
+    Fenway reads ``Fenway (D)``. A trunk stop is served by several branches
+    and keeps the plain name, so Park Street stays ``Park Street``.
     """
+    plain = station.name.split(" - ")[0]
     family = _line_family(station)
-    if family.startswith("GREEN-") and len(family) == 7 and family[-1].isalpha():
-        return f"GREEN {family[-1]}"
-    return ""
+    route_id = station.route_id or ""
+    if (
+        family.startswith("GREEN-")
+        and len(family) == 7
+        and family[-1].isalpha()
+        and "," not in route_id
+    ):
+        return f"{plain} ({family[-1]})"
+    return plain
+
+
+def format_clock(now: datetime | None = None) -> str:
+    """12-hour local time for the header corner, e.g. ``1:05 PM``.
+
+    An aware ``now`` is shown in its own zone. When ``now`` is omitted, the
+    clock uses the Pi's local time.
+    """
+    current = now if now is not None else datetime.now().astimezone()
+    if current.tzinfo is None:
+        current = current.astimezone()
+    hour = current.hour % 12 or 12
+    suffix = "AM" if current.hour < 12 else "PM"
+    return f"{hour}:{current.minute:02d} {suffix}"
 
 
 def build_board(
@@ -146,12 +169,16 @@ def build_board(
     departures,
     route_label: str = "",
     status: str = "",
+    clock: str = "",
+    line_hint: str = "",
 ) -> PixelMatrix:
     matrix = PixelMatrix(display.width, display.height)
-    if not route_label and departures:
+    if not clock and not route_label and departures:
         route_label = compact_route_label(departures[0])
     if departures:
         line_color = color_for_line(departures[0].line, departures[0].branch)
+    elif line_hint:
+        line_color = color_for_line(line_hint)
     elif route_label.startswith("GREEN"):
         line_color = color_for_line("Green Line")
     else:
@@ -163,6 +190,7 @@ def build_board(
         departures,
         line_color=line_color,
         status=status,
+        clock=clock,
     )
     return matrix
 
@@ -219,15 +247,16 @@ async def _render_current(
 ) -> None:
     """Fetch live data for the selected station and push it to the panel."""
     station = manager.current_station()
-    header_name = station.name.split(" - ")[0]
-    departures = await _get_departures(client, station, header_name)
+    header_name = station_header_name(station)
+    departures = await _get_departures(client, station, header_name.split(" (")[0])
     display.render(
         build_board(
             display,
             header_name,
             departures,
-            route_label=route_label_for_station(station),
             status=_LAST_STATUS,
+            clock=format_clock(),
+            line_hint=_line_family(station),
         )
     )
 
