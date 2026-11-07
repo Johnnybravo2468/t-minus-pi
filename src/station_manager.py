@@ -33,13 +33,40 @@ class DisplayMode(Enum):
     STATION_SELECT = "Station Selection Mode"
 
 
-def _line_family(station: RouteConfig) -> str:
-    """Group a station's route into a line 'family' used for line cycling.
+def _green_branch_family(station: RouteConfig) -> Optional[str]:
+    """Return ``GREEN-B`` (or C/D/E) when this station belongs to one branch.
 
-    e.g. any Green-* -> 'GREEN', Red -> 'RED', CR-* -> 'COMMUTER'.
+    Trunk stops store every serving branch in ``route_id`` (``Green-B,Green-D``)
+    and keep the branch being cycled in the station id (``Green-B:place-pktrm``).
+    A single-branch station can carry it in ``route_id`` alone (``Green-D``).
     """
+    head = (station.id or "").split(":", 1)[0]
+    route_id = station.route_id or ""
+    candidates = [head]
+    if "," not in route_id:
+        candidates.append(route_id)
+    for value in candidates:
+        text = value.upper()
+        suffix = text.split("-", 1)[1] if text.startswith("GREEN-") else ""
+        if len(suffix) == 1 and suffix.isalpha():
+            return text
+    if route_id.upper().startswith("GREEN"):
+        return "GREEN"
+    return None
+
+
+def _line_family(station: RouteConfig) -> str:
+    """Group a station into the line used for cycling.
+
+    Each Green branch is its own line (``GREEN-B``, ``GREEN-C``, ``GREEN-D``,
+    ``GREEN-E``), same as Red, Orange, and Blue. Other routes stay one family
+    each: ``RED``, ``ORANGE``, ``BLUE``, ``COMMUTER``.
+    """
+    green = _green_branch_family(station)
+    if green:
+        return green
     route_id = (station.route_id or "").upper()
-    for family in ("GREEN", "RED", "ORANGE", "BLUE"):
+    for family in ("RED", "ORANGE", "BLUE"):
         if route_id.startswith(family):
             return family
     if route_id.startswith("CR-"):
@@ -120,7 +147,7 @@ class StationManager:
     # --- line cycling ------------------------------------------------------
 
     def current_line(self) -> str:
-        """The line family of the currently selected station (e.g. 'GREEN')."""
+        """The line of the currently selected station (e.g. 'GREEN-D' or 'RED')."""
         return _line_family(self.current_station())
 
     def _line_order(self) -> List[str]:

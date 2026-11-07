@@ -70,7 +70,7 @@ def _multiline():
 
 def test_current_line_family():
     m = StationManager(_multiline())
-    assert m.current_line() == "GREEN"
+    assert m.current_line() == "GREEN-D"
 
 
 def test_next_line_cycles_families_and_lands_on_first_of_line():
@@ -79,13 +79,31 @@ def test_next_line_cycles_families_and_lands_on_first_of_line():
     assert m.current_line() == "RED"
     assert m.next_line().id == "cr"       # RED -> COMMUTER
     assert m.current_line() == "COMMUTER"
-    assert m.next_line().id == "g1"       # wraps to GREEN (first green station)
+    assert m.next_line().id == "g1"       # wraps to GREEN-D (first green station)
 
 
 def test_next_line_single_line_is_noop():
     m = StationManager(_stations("a", "b", "c"))  # all Green-D
     assert m.next_line().id == "a"
     assert m.current_index == 0
+
+
+def test_green_branches_cycle_as_separate_lines():
+    stations = [
+        RouteConfig(id="Green-B:park", type="subway", route_id="Green-B,Green-D", stop_id="park", name="Park B"),
+        RouteConfig(id="Green-B:bc", type="subway", route_id="Green-B", stop_id="bc", name="Boston College"),
+        RouteConfig(id="Green-D:park", type="subway", route_id="Green-B,Green-D", stop_id="park", name="Park D"),
+        RouteConfig(id="Green-D:fenway", type="subway", route_id="Green-D", stop_id="fenway", name="Fenway"),
+        RouteConfig(id="Red:dtx", type="subway", route_id="Red", stop_id="dtx", name="Downtown Crossing"),
+    ]
+    m = StationManager(stations)
+    assert m.current_line() == "GREEN-B"
+    assert m.next_station().id == "Green-B:bc"
+    assert m.next_station().id == "Green-B:park"  # stays on B, not the D copy of Park
+    assert m.next_line().id == "Green-D:park"
+    assert m.current_line() == "GREEN-D"
+    assert m.next_line().id == "Red:dtx"
+    assert m.current_line() == "RED"
 
 
 def test_next_station_stays_within_current_line():

@@ -38,36 +38,55 @@ def _build(include_commuter=False):
 def test_dedup_within_line_but_keep_across_lines():
     stations = _build()
 
-    # Park Street appears once under Red and once under Green (across lines),
-    # but only once within Green even though both Green-B and Green-D serve it.
+    # Park Street is one Red station and one station on each Green branch that
+    # serves it. The branch copies are duplicates of the same physical stop.
     park = [s for s in stations if s.stop_id == "place-pktrm"]
-    families = sorted({s.route_id.split("-")[0] for s in park})
-    assert families == ["Green", "Red"]
-    green_park = [s for s in park if s.route_id.startswith("Green")]
-    assert len(green_park) == 1
+    assert sorted(s.id for s in park) == [
+        "Green-B:place-pktrm",
+        "Green-D:place-pktrm",
+        "Red:place-pktrm",
+    ]
 
 
 def test_green_trunk_stop_combines_all_branches():
     stations = _build()
-    # Park Street is served by Green-B and Green-D in the fixture; the combined
-    # Green station should list both branches so predictions include each.
-    green_park = next(
-        s for s in stations if s.stop_id == "place-pktrm" and s.route_id.startswith("Green")
-    )
-    assert green_park.route_id == "Green-B,Green-D"
-    assert green_park.name == "Park Street - Green Line"
+    # Each branch keeps its own Park Street. Both copies list every serving
+    # branch so the board merges inbound and outbound trains from all of them.
+    green_park = [
+        s for s in stations if s.stop_id == "place-pktrm" and s.id.startswith("Green-")
+    ]
+    assert [s.id for s in green_park] == ["Green-B:place-pktrm", "Green-D:place-pktrm"]
+    assert {s.route_id for s in green_park} == {"Green-B,Green-D"}
+    assert [s.name for s in green_park] == [
+        "Park Street - Green Line B",
+        "Park Street - Green Line D",
+    ]
+
+
+def test_branch_only_stop_keeps_its_own_route():
+    stations = _build()
+    fenway = next(s for s in stations if s.stop_id == "place-fenwy")
+    assert fenway.id == "Green-D:place-fenwy"
+    assert fenway.route_id == "Green-D"
+    boylston = next(s for s in stations if s.stop_id == "place-boyls")
+    assert boylston.id == "Green-B:place-boyls"
+    assert boylston.route_id == "Green-B"
 
 
 def test_built_stations_group_into_lines():
     stations = _build()
     m = StationManager(stations)
-    # Red first, then Green family.
+    # Red first, then each Green branch as its own line.
     assert m.current_line() == "RED"
     m.next_line()
-    assert m.current_line() == "GREEN"
-    # Within green there are Park Street, Boylston, Fenway (deduped).
-    green_names = {s.stop_id for s in stations if s.route_id.startswith("Green")}
-    assert green_names == {"place-pktrm", "place-boyls", "place-fenwy"}
+    assert m.current_line() == "GREEN-B"
+    assert m.current_station().id == "Green-B:place-pktrm"
+    assert m.next_station().id == "Green-B:place-boyls"
+    assert m.next_station().id == "Green-B:place-pktrm"  # wraps inside B
+    m.next_line()
+    assert m.current_line() == "GREEN-D"
+    assert m.current_station().id == "Green-D:place-pktrm"
+    assert m.next_station().id == "Green-D:place-fenwy"
 
 
 def test_types_filter_switches_with_commuter_flag():
