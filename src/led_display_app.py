@@ -53,7 +53,7 @@ from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_bo
 from src.line_stations import build_all_line_stations
 from src.mbta_client import MBTAClient
 from src.rpi_led_display import RaspberryPiLEDDisplay
-from src.station_manager import StationManager, station_manager_from_config
+from src.station_manager import StationManager, _line_family, station_manager_from_config
 from src.transit_service import fetch_station_departures
 
 # Keyboard keys mapped to abstract input events (the same events physical
@@ -119,13 +119,32 @@ def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
     )
 
 
-def build_board(display: RaspberryPiLEDDisplay, station_name: str, departures) -> PixelMatrix:
+def route_label_for_station(station) -> str:
+    """Corner label for the line being cycled, e.g. ``GREEN B``.
+
+    Trunk stops fetch every Green branch, so the first departure no longer
+    tells you which branch's station list you are on. The station's line does.
+    """
+    family = _line_family(station)
+    if family.startswith("GREEN-") and len(family) == 7 and family[-1].isalpha():
+        return f"GREEN {family[-1]}"
+    return ""
+
+
+def build_board(
+    display: RaspberryPiLEDDisplay,
+    station_name: str,
+    departures,
+    route_label: str = "",
+) -> PixelMatrix:
     matrix = PixelMatrix(display.width, display.height)
-    if departures:
+    if not route_label and departures:
         route_label = compact_route_label(departures[0])
+    if departures:
         line_color = color_for_line(departures[0].line, departures[0].branch)
+    elif route_label.startswith("GREEN"):
+        line_color = color_for_line("Green Line")
     else:
-        route_label = ""
         line_color = WHITE
     render_station_board(matrix, station_name, route_label, departures, line_color=line_color)
     return matrix
@@ -161,7 +180,14 @@ async def _render_current(
     station = manager.current_station()
     header_name = station.name.split(" - ")[0]
     departures = await _get_departures(client, station, header_name)
-    display.render(build_board(display, header_name, departures))
+    display.render(
+        build_board(
+            display,
+            header_name,
+            departures,
+            route_label=route_label_for_station(station),
+        )
+    )
 
 
 async def _run_loop(args: argparse.Namespace) -> None:

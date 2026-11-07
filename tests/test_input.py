@@ -59,13 +59,13 @@ def test_app_controller_maps_events_to_station_actions():
 def test_toggle_event_cycles_lines():
     manager = StationManager(_multiline_stations())
     controller = AppController(manager)
-    assert manager.current_line() == "GREEN"
+    assert manager.current_line() == "GREEN-D"
     controller.handle_event(TOGGLE)
     assert manager.current_line() == "RED"
     controller.handle_event(TOGGLE)
     assert manager.current_line() == "BLUE"
     controller.handle_event(TOGGLE)
-    assert manager.current_line() == "GREEN"  # wraps
+    assert manager.current_line() == "GREEN-D"  # wraps
 
 
 def test_app_controller_ignores_unknown_event():
