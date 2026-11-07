@@ -10,8 +10,8 @@
 
 [Unit]
 Description=t-minus-pi LED Matrix Transit Display
-After=network-online.target
-Wants=network-online.target
+# Start with the rest of boot. The board lights even when the network is
+# still coming up, and fills in the other stations once the API answers.
 
 [Service]
 Type=simple

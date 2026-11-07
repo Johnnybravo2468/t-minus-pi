@@ -57,13 +57,13 @@ Look for `Phone controls:` or `Current address:`.
 
 ### SSH, stop, and update
 
-From a computer on the same network, while the board is running:
+`t-minus-pi.local` is announced only while the board program is running. When the panels are dark, SSH to the Pi's own hostname or the address from the router:
 
 ```bash
-ssh johnnybravo2468@t-minus-pi.local
+ssh johnnybravo2468@raspberrypi.local
 ```
 
-If that name does not resolve, use the Pi's `192.168.0.x` address from the router, or `ssh johnnybravo2468@raspberrypi.local`. The account is `johnnybravo2468`. The repo is `/home/johnnybravo2468/t-minus-pi`.
+The account is `johnnybravo2468`. The repo is `/home/johnnybravo2468/t-minus-pi`. If the hostname does not resolve, use the Pi's `192.168.0.x` address.
 
 The display is the `t-minus-pi-led` service. Stopping it turns the panels off and takes the phone page down:
 
@@ -111,6 +111,26 @@ sudo systemctl enable --now t-minus-pi-led
 ```
 
 Turn boot startup off with `sudo systemctl disable --now t-minus-pi-led`.
+
+If a power cycle leaves the panels dark and the phone page does not open, the service is stopped or it exited. SSH in with `raspberrypi.local` (the phone name is down with the board) and check:
+
+```bash
+systemctl status t-minus-pi-led --no-pager
+journalctl -u t-minus-pi-led -n 60 --no-pager
+```
+
+`Unit t-minus-pi-led.service could not be found` means the unit was never installed. `status=203/EXEC` means the installed unit still points at `/home/pi` or a Python path that is not there. Copy the unit again and enable it:
+
+```bash
+cd /home/johnnybravo2468/t-minus-pi
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+sudo cp systemd/t-minus-pi-led.service.example /etc/systemd/system/t-minus-pi-led.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now t-minus-pi-led
+systemctl status t-minus-pi-led --no-pager
+```
 
 The matrix refresh can disturb Wi-Fi. Ethernet from the Pi to the router has been the reliable link. The phone and the Pi have to be on the same network.
 

@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import src.led_display_app as app
 from src.app_controller import AppController
-from src.config import RouteConfig
+from src.config import RouteConfig, load_config
 from src.input_controller import (
     BUS_MODE,
     BUTTON_3,
@@ -130,6 +130,42 @@ def test_route_number_survives_a_narrow_header():
     assert _abbreviate("Brookline Ave at Fenway (47)", 13) == "BROOKLIN (47)"
     assert _abbreviate("Copley (9)", 13) == "COPLEY (9)"
     assert _abbreviate("Fenway (D)", 13) == "FENWAY (D)"
+
+
+def test_boot_still_starts_when_the_station_list_cannot_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class Down:
+        async def fetch_route_ids(self, types):
+            raise OSError("network is down")
+
+        async def fetch_route_stops(self, route_id):
+            return []
+
+    args = __import__("argparse").Namespace(all_lines=True, include_commuter=False)
+    manager = asyncio.run(app._build_manager(args, load_config(), Down(), attempts=1, pause=0))
+    assert manager.catalog_complete is False
+    assert manager.current_station().stop_id == "place-fenwy"
+
+    class Up:
+        async def fetch_route_ids(self, types):
+            return [("Green-D", "Green Line D"), ("Red", "Red Line")]
+
+        async def fetch_route_stops(self, route_id):
+            if route_id == "Green-D":
+                return [
+                    {"id": "place-fenwy", "name": "Fenway"},
+                    {"id": "place-kencl", "name": "Kenmore"},
+                ]
+            if route_id == "Red":
+                return [{"id": "place-alfcl", "name": "Alewife"}]
+            return []
+
+    asyncio.run(app._ensure_full_catalog(args, Up(), manager))
+    assert manager.catalog_complete is True
+    assert manager.current_station().stop_id == "place-fenwy"
+    assert manager.current_line() == "GREEN-D"
+    assert manager.station_count > 3
 
 
 def test_led_service_matches_this_pi():

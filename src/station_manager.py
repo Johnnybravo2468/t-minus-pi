@@ -123,6 +123,8 @@ class StationManager:
         # Last selection on the other service, so the bus button can return
         # to the subway stop that was on screen.
         self._mode_index: dict = {"rail": None, "bus": None}
+        # The LED app sets this False when --all-lines could not load yet.
+        self.catalog_complete = True
 
     # --- selection state ---------------------------------------------------
 
@@ -234,6 +236,24 @@ class StationManager:
                 self._index = i
                 return self.current_station()
         raise ValueError(f"No station with id {station!r}")
+
+    def replace_stations(self, stations: List[RouteConfig]) -> None:
+        """Swap in a new station list and stay on the same stop when it exists.
+
+        Used when the full line list arrives after the board already started
+        on the small built-in set.
+        """
+        if not stations:
+            raise ValueError("StationManager requires at least one station")
+        previous = self.current_station()
+        self._stations = list(stations)
+        self._index = 0
+        self._mode_index = {"rail": None, "bus": None}
+        if self.select_stop(previous.stop_id, _line_family(previous)):
+            return
+        if self.select_stop(previous.stop_id):
+            return
+        self.select_stop("place-fenwy", "GREEN-D")
 
     def select_stop(self, stop_id: str, line: Optional[str] = None) -> bool:
         """Select the first station with this MBTA stop id.

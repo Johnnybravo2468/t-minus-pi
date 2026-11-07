@@ -152,6 +152,18 @@ def test_next_line_does_not_enter_bus_routes():
     assert "BUS-47" not in seen
 
 
+def test_replace_stations_keeps_the_same_stop():
+    start = StationManager(_stations("a", "b"))
+    start.next_station()
+    assert start.current_station().id == "b"
+    start.replace_stations([
+        RouteConfig(id="b", type="subway", route_id="Green-D", stop_id="stop-b", name="B"),
+        RouteConfig(id="c", type="subway", route_id="Red", stop_id="stop-c", name="C"),
+    ])
+    assert start.current_station().id == "b"
+    assert start.station_count == 2
+
+
 def test_next_station_stays_within_current_line():
     # Two green stops, then two red stops.
     stations = [

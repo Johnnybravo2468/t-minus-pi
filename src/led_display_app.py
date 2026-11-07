@@ -140,13 +140,65 @@ def _start_at_fenway(manager: StationManager) -> StationManager:
     return manager
 
 
-async def _build_manager(args: argparse.Namespace, config, client: MBTAClient) -> StationManager:
-    if args.all_lines:
-        stations = await build_all_line_stations(client, include_commuter=args.include_commuter)
-        if stations:
-            return _start_at_fenway(StationManager(stations))
+def _fallback_manager(config) -> StationManager:
+    """Fenway plus the bus stops, used when the full line list cannot be loaded."""
     base = station_manager_from_config(config)
-    return _start_at_fenway(StationManager(list(base._stations) + build_bus_stations()))
+    manager = _start_at_fenway(StationManager(list(base._stations) + build_bus_stations()))
+    manager.catalog_complete = False
+    return manager
+
+
+async def _build_manager(
+    args: argparse.Namespace,
+    config,
+    client: MBTAClient,
+    attempts: int = 4,
+    pause: float = 3.0,
+) -> StationManager:
+    if args.all_lines:
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                stations = await build_all_line_stations(
+                    client, include_commuter=args.include_commuter
+                )
+            except Exception as exc:
+                last_error = exc
+                stations = []
+            if stations:
+                manager = _start_at_fenway(StationManager(stations))
+                manager.catalog_complete = True
+                return manager
+            if attempt + 1 < attempts:
+                print(f"Station list was not loaded ({last_error}). Retrying.", flush=True)
+                if pause:
+                    await asyncio.sleep(pause)
+        print(
+            f"Starting with Fenway until the full station list loads: {last_error}",
+            flush=True,
+        )
+        return _fallback_manager(config)
+    manager = _fallback_manager(config)
+    manager.catalog_complete = True
+    return manager
+
+
+async def _ensure_full_catalog(args, client: MBTAClient, manager: StationManager) -> None:
+    """Fill in every station once the API answers. A miss leaves the board up."""
+    if not args.all_lines or manager.catalog_complete:
+        return
+    try:
+        stations = await build_all_line_stations(
+            client, include_commuter=args.include_commuter
+        )
+    except Exception as exc:
+        print(f"Station list was not loaded: {exc}", flush=True)
+        return
+    if not stations:
+        return
+    manager.replace_stations(stations)
+    manager.catalog_complete = True
+    print("Loaded the full station list.", flush=True)
 
 
 def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
@@ -340,8 +392,12 @@ async def _run_loop(args: argparse.Namespace) -> None:
     controller = AppController(manager)
     inputs = SimulatedInputController()
     controller.connect(inputs)
-    try:
+    async def refresh() -> None:
+        await _ensure_full_catalog(args, client, manager)
         await _render_current(client, display, manager)
+
+    try:
+        await refresh()
         while True:
             if args.once:
                 break
@@ -354,11 +410,11 @@ async def _run_loop(args: argparse.Namespace) -> None:
                 if action == "quit":
                     break
                 if action != "unknown":
-                    await _render_current(client, display, manager)
+                    await refresh()
                 continue
             if args.rotate:
                 manager.next_station()
-            await _render_current(client, display, manager)
+            await refresh()
     finally:
         await client.aclose()
         display.clear()
@@ -440,6 +496,7 @@ async def _run_interactive(args: argparse.Namespace) -> None:
         return await _read_command(commands, interval)
 
     async def render() -> None:
+        await _ensure_full_catalog(args, client, manager)
         await _render_current(client, display, manager)
 
     try:
