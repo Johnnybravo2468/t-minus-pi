@@ -193,6 +193,22 @@ class StationManager:
                 return self.current_station()
         raise ValueError(f"No station with id {station!r}")
 
+    def select_stop(self, stop_id: str, line: Optional[str] = None) -> bool:
+        """Select the first station with this MBTA stop id.
+
+        ``line`` limits the match to one family, such as ``GREEN-D``, so a
+        trunk stop that exists on several branches does not pick the wrong copy.
+        Returns False when nothing matches and leaves the current selection.
+        """
+        for i, station in enumerate(self._stations):
+            if station.stop_id != stop_id:
+                continue
+            if line is not None and _line_family(station) != line:
+                continue
+            self._index = i
+            return True
+        return False
+
     # --- display mode ------------------------------------------------------
 
     @property

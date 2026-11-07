@@ -53,6 +53,20 @@ def test_select_by_index_and_id():
     assert m.select_station(4).id == "b"  # index wraps (4 % 3 == 1)
 
 
+def test_select_stop_prefers_the_requested_line():
+    stations = [
+        RouteConfig(id="Red:place-fenwy", type="subway", route_id="Red", stop_id="place-fenwy", name="Not Fenway"),
+        RouteConfig(id="Green-B:place-pktrm", type="subway", route_id="Green-B", stop_id="place-pktrm", name="Park"),
+        RouteConfig(id="Green-D:place-fenwy", type="subway", route_id="Green-D", stop_id="place-fenwy", name="Fenway"),
+    ]
+    m = StationManager(stations)
+    assert m.current_station().id == "Red:place-fenwy"
+    assert m.select_stop("place-fenwy", "GREEN-D") is True
+    assert m.current_station().id == "Green-D:place-fenwy"
+    assert m.select_stop("place-missing", "GREEN-D") is False
+    assert m.current_station().id == "Green-D:place-fenwy"
+
+
 def test_select_unknown_id_raises():
     m = StationManager(_stations("a", "b"))
     with pytest.raises(ValueError):

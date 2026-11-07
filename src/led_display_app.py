@@ -108,12 +108,23 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# Green-D Fenway. Startup always lands here when that stop is in the list.
+FENWAY_STOP_ID = "place-fenwy"
+FENWAY_LINE = "GREEN-D"
+
+
+def _start_at_fenway(manager: StationManager) -> StationManager:
+    """Open on Fenway when it is loaded. Otherwise keep the first station."""
+    manager.select_stop(FENWAY_STOP_ID, FENWAY_LINE)
+    return manager
+
+
 async def _build_manager(args: argparse.Namespace, config, client: MBTAClient) -> StationManager:
     if args.all_lines:
         stations = await build_all_line_stations(client, include_commuter=args.include_commuter)
         if stations:
-            return StationManager(stations)
-    return station_manager_from_config(config)
+            return _start_at_fenway(StationManager(stations))
+    return _start_at_fenway(station_manager_from_config(config))
 
 
 def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
