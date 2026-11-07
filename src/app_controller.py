@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Callable, Dict, Optional
 
 from src.input_controller import (
+    BUS_MODE,
     BUTTON_3,
     InputController,
     NEXT_STATION,
@@ -45,10 +46,12 @@ class AppController:
         self._actions: Dict[str, Callable[[], object]] = {
             NEXT_STATION: self.stations.next_station,
             PREVIOUS_STATION: self.stations.previous_station,
-            # The dedicated toggle button cycles through lines.
+            # The dedicated toggle button cycles through lines in the current
+            # service (subway lines, or bus routes when those are on screen).
             TOGGLE: self.stations.next_line,
             # BUTTON_3 is a placeholder "confirm / select current" for now.
             BUTTON_3: self.stations.current_station,
+            BUS_MODE: self.stations.switch_service,
         }
 
     def handle_event(self, event: str) -> None:

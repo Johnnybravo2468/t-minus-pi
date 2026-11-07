@@ -3,6 +3,7 @@
 from src.app_controller import AppController
 from src.config import RouteConfig
 from src.input_controller import (
+    BUS_MODE,
     KNOWN_EVENTS,
     NEXT_STATION,
     PREVIOUS_STATION,
@@ -96,5 +97,19 @@ def test_end_to_end_input_drives_station_manager():
     assert manager.current_station().id == "b"
 
 
+def test_bus_mode_event_switches_service():
+    stations = _multiline_stations() + [
+        RouteConfig(id="47:1807", type="bus", route_id="47", stop_id="1807", name="Park Dr at Fenway"),
+    ]
+    manager = StationManager(stations)
+    controller = AppController(manager)
+    controller.handle_event(BUS_MODE)
+    assert manager.service_mode() == "bus"
+    assert manager.current_station().id == "47:1807"
+    controller.handle_event(BUS_MODE)
+    assert manager.service_mode() == "rail"
+    assert manager.current_line() == "GREEN-D"
+
+
 def test_known_events_set():
-    assert KNOWN_EVENTS == {"NEXT_STATION", "PREVIOUS_STATION", "TOGGLE", "BUTTON_3"}
+    assert KNOWN_EVENTS == {"NEXT_STATION", "PREVIOUS_STATION", "TOGGLE", "BUTTON_3", "BUS_MODE"}

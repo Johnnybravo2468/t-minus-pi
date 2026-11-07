@@ -120,6 +120,38 @@ def test_green_branches_cycle_as_separate_lines():
     assert m.current_line() == "RED"
 
 
+def test_bus_button_switches_service_and_remembers_the_stop():
+    stations = _multiline() + [
+        RouteConfig(id="47:1807", type="bus", route_id="47", stop_id="1807", name="Park Dr at Fenway"),
+        RouteConfig(id="47:1806", type="bus", route_id="47", stop_id="1806", name="Brookline Ave at Fenway"),
+        RouteConfig(id="9:175", type="bus", route_id="9", stop_id="175", name="Copley"),
+    ]
+    m = StationManager(stations)
+    m.next_station()  # second Green-D stop
+    assert m.current_station().id == "g2"
+    assert m.switch_service().id == "47:1807"
+    assert m.service_mode() == "bus"
+    assert m.next_station().id == "47:1806"
+    assert m.next_line().id == "9:175"          # 47 -> 9, not back to the subway
+    assert m.current_line() == "BUS-9"
+    assert m.switch_service().id == "g2"        # back to the subway stop we left
+    assert m.service_mode() == "rail"
+    assert m.switch_service().id == "9:175"     # bus side remembers Copley
+
+
+def test_next_line_does_not_enter_bus_routes():
+    stations = _multiline() + [
+        RouteConfig(id="47:1807", type="bus", route_id="47", stop_id="1807", name="Park Dr"),
+    ]
+    m = StationManager(stations)
+    seen = []
+    for _ in range(6):
+        seen.append(m.current_line())
+        m.next_line()
+    assert seen[:4] == ["GREEN-D", "RED", "COMMUTER", "GREEN-D"]
+    assert "BUS-47" not in seen
+
+
 def test_next_station_stays_within_current_line():
     # Two green stops, then two red stops.
     stations = [

@@ -57,9 +57,10 @@ def test_press_accepts_station_keys_only():
     assert control.press("N") is True
     assert control.press("p") is True
     assert control.press("t") is True
+    assert control.press("B") is True
     assert control.press("q") is False
     assert control.press("nope") is False
-    assert [commands.get_nowait() for _ in range(3)] == ["n", "p", "t"]
+    assert [commands.get_nowait() for _ in range(4)] == ["n", "p", "t", "b"]
     assert commands.empty()
 
 
@@ -77,10 +78,16 @@ def test_phone_page_serves_buttons_and_queues_them():
         assert "Next station" in page
         assert "Previous station" in page
         assert "Next line" in page
+        assert "Bus routes" in page
 
         with urllib.request.urlopen(base + "/api/state") as response:
             state = json.loads(response.read().decode("utf-8"))
-        assert state == {"name": "Fenway (D)", "line": "GREEN-D", "status": "NO LINK"}
+        assert state == {
+            "name": "Fenway (D)",
+            "line": "GREEN-D",
+            "status": "NO LINK",
+            "mode": "rail",
+        }
 
         request = urllib.request.Request(
             base + "/api/action",

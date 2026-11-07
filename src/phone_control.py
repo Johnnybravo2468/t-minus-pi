@@ -26,7 +26,7 @@ _ANNOUNCER = None
 
 # Keys the page is allowed to send. Quit stays on the keyboard so a tap
 # cannot shut the board down.
-PHONE_KEYS = {"n", "p", "t"}
+PHONE_KEYS = {"n", "p", "t", "b"}
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -55,6 +55,7 @@ PAGE = """<!DOCTYPE html>
   <button type="button" onclick="act('p')">Previous station</button>
   <button class="primary" type="button" onclick="act('n')">Next station</button>
   <button type="button" onclick="act('t')">Next line</button>
+  <button type="button" id="mode" onclick="act('b')">Bus routes</button>
   <script>
     async function refresh() {
       const response = await fetch("/api/state");
@@ -63,6 +64,8 @@ PAGE = """<!DOCTYPE html>
       const detail = document.getElementById("detail");
       detail.textContent = state.status || state.line || "";
       detail.className = state.status ? "fault" : "";
+      const mode = document.getElementById("mode");
+      mode.textContent = state.mode === "bus" ? "Subway" : "Bus routes";
     }
     async function act(key) {
       await fetch("/api/action", {
@@ -90,16 +93,23 @@ class PhoneControl:
         self.name = ""
         self.line = ""
         self.status = ""
+        self.mode = "rail"
 
-    def update(self, name: str, line: str, status: str) -> None:
+    def update(self, name: str, line: str, status: str, mode: str = "rail") -> None:
         with self._lock:
             self.name = name
             self.line = line
             self.status = status
+            self.mode = mode or "rail"
 
     def snapshot(self) -> dict:
         with self._lock:
-            return {"name": self.name, "line": self.line, "status": self.status}
+            return {
+                "name": self.name,
+                "line": self.line,
+                "status": self.status,
+                "mode": self.mode,
+            }
 
     def press(self, key: str) -> bool:
         """Queue a button press. Unknown keys are ignored."""

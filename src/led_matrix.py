@@ -132,9 +132,19 @@ def _abbreviate(text: str, max_chars: int) -> str:
     text = text.upper()
     for full, short in _ABBREVIATIONS.items():
         text = text.replace(full, short)
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars]
+    suffix = ""
+    if text.endswith(")") and " (" in text:
+        name, _, tail = text.rpartition(" (")
+        # Keep a short route marker such as " (D)" or " (47)" on the header.
+        if tail.endswith(")") and len(tail) <= 6 and name:
+            suffix = f" ({tail}"
+            text = name
+    if len(text) + len(suffix) <= max_chars:
+        return text + suffix
+    room = max_chars - len(suffix)
+    if room < 1:
+        return (text + suffix)[:max_chars]
+    return text[:room].rstrip() + suffix
 
 
 def _status_color(status: str) -> RGB:

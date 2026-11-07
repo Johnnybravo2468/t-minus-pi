@@ -57,6 +57,7 @@ from src.config import load_config
 from src.diagnostics import has_default_route, panel_status
 from src.display_encoder import compact_route_label
 from src.input_controller import (
+    BUS_MODE,
     BUTTON_3,
     NEXT_STATION,
     PREVIOUS_STATION,
@@ -64,7 +65,7 @@ from src.input_controller import (
     TOGGLE,
 )
 from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
-from src.line_stations import build_all_line_stations
+from src.line_stations import build_all_line_stations, build_bus_stations
 from src.mbta_client import MBTAClient
 from src.phone_control import (
     PhoneControl,
@@ -83,10 +84,12 @@ KEY_TO_EVENT = {
     "n": NEXT_STATION,
     "p": PREVIOUS_STATION,
     "t": TOGGLE,
+    "b": BUS_MODE,
     "3": BUTTON_3,
 }
 KEY_HELP = (
-    "Keys: n=next station, p=previous station, t=next line, 3=button3, q=quit\n"
+    "Keys: n=next station, p=previous station, t=next line, b=bus routes, "
+    "3=button3, q=quit\n"
     "The station on screen refreshes on its own. Keys only change the station."
 )
 
@@ -142,7 +145,8 @@ async def _build_manager(args: argparse.Namespace, config, client: MBTAClient) -
         stations = await build_all_line_stations(client, include_commuter=args.include_commuter)
         if stations:
             return _start_at_fenway(StationManager(stations))
-    return _start_at_fenway(station_manager_from_config(config))
+    base = station_manager_from_config(config)
+    return _start_at_fenway(StationManager(list(base._stations) + build_bus_stations()))
 
 
 def _make_display(args: argparse.Namespace) -> RaspberryPiLEDDisplay:
@@ -166,8 +170,11 @@ def station_header_name(station) -> str:
     ``Park Street (D)``. Switching to the B list at that same stop reads
     ``Park Street (B)``. Other lines keep the plain station name.
     """
-    plain = station.name.split(" - ")[0]
     family = _line_family(station)
+    if family.startswith("BUS-"):
+        # Keep the full stop name. Bus stops can already contain " - ".
+        return f"{station.name} ({family.split('-', 1)[1]})"
+    plain = station.name.split(" - ")[0]
     if family.startswith("GREEN-") and len(family) == 7 and family[-1].isalpha():
         return f"{plain} ({family[-1]})"
     return plain
@@ -199,7 +206,10 @@ def build_board(
     matrix = PixelMatrix(display.width, display.height)
     if not clock and not route_label and departures:
         route_label = compact_route_label(departures[0])
-    if departures:
+    # Bus stop names stay white. Rail names keep the line color.
+    if (line_hint or "").startswith("BUS"):
+        line_color = WHITE
+    elif departures:
         line_color = color_for_line(departures[0].line, departures[0].branch)
     elif line_hint:
         line_color = color_for_line(line_hint)
@@ -293,7 +303,12 @@ def _publish_phone(manager: StationManager) -> None:
     if phone is None:
         return
     station = manager.current_station()
-    phone.update(station_header_name(station), manager.current_line(), _LAST_STATUS)
+    phone.update(
+        station_header_name(station),
+        manager.current_line(),
+        _LAST_STATUS,
+        manager.service_mode(),
+    )
 
 
 def _start_phone(args: argparse.Namespace, commands: queue.Queue) -> None:
