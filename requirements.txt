@@ -10,3 +10,4 @@ pytest-asyncio>=0.23.5
 # Provides the IANA timezone database used by ZoneInfo("America/New_York").
 # Required on Windows (and useful anywhere the OS tz database is missing).
 tzdata>=2024.1
+zeroconf>=0.132

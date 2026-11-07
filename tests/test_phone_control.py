@@ -2,10 +2,53 @@
 
 import json
 import queue
+import socket
 import urllib.error
 import urllib.request
 
-from src.phone_control import PhoneControl, start_phone_server
+import pytest
+
+from src.phone_control import (
+    PhoneControl,
+    phone_url,
+    preferred_lan_ip,
+    start_phone_server,
+)
+
+
+def test_stable_service_points_at_the_fixed_name():
+    pytest.importorskip("zeroconf")
+    from src.phone_control import stable_service
+
+    info = stable_service(8080, "192.168.0.23")
+    assert info.server == "t-minus-pi.local."
+    assert info.port == 8080
+    assert socket.inet_ntoa(info.addresses[0]) == "192.168.0.23"
+
+
+def test_avahi_command_uses_the_fixed_name(monkeypatch):
+    from src import phone_control
+
+    monkeypatch.setattr(phone_control.shutil, "which", lambda name: "/usr/bin/avahi-publish" if name == "avahi-publish" else None)
+    assert phone_control.avahi_publish_command("192.168.0.23") == [
+        "avahi-publish",
+        "-a",
+        "-R",
+        "t-minus-pi.local",
+        "192.168.0.23",
+    ]
+
+
+def test_phone_url_stays_fixed():
+    assert phone_url() == "http://t-minus-pi.local:8080"
+    assert phone_url(9000) == "http://t-minus-pi.local:9000"
+
+
+def test_preferred_lan_ip_picks_the_home_network():
+    assert preferred_lan_ip(["127.0.0.1", "169.254.1.1", "192.168.0.23"]) == "192.168.0.23"
+    assert preferred_lan_ip(["10.0.0.5", "192.168.0.23"]) == "10.0.0.5"
+    assert preferred_lan_ip(["127.0.0.1", "0.0.0.0"]) is None
+    assert preferred_lan_ip([]) is None
 
 
 def test_press_accepts_station_keys_only():

@@ -1,19 +1,28 @@
 """Phone controls for the LED board on the local network.
 
-A small web page on the Pi's LAN address has the same buttons as the keyboard:
-previous station, next station, and next line. Any phone on the same network
-can open the page. Nothing here is exposed beyond that network by itself.
+A small web page has the same buttons as the keyboard: previous station, next
+station, and next line. While the program is running the page answers at one
+fixed name, ``http://t-minus-pi.local:8080``, even when the Pi's numeric
+address changes. Any phone on the same network can open it. Nothing here is
+exposed beyond that network by itself.
 """
 
 from __future__ import annotations
 
 import json
 import queue
+import shutil
 import socket
+import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import urlparse
+
+# Bookmark this. The name is announced only while this program is running.
+STABLE_HOST = "t-minus-pi.local"
+# Held so the announcer is not garbage-collected while the board is up.
+_ANNOUNCER = None
 
 # Keys the page is allowed to send. Quit stays on the keyboard so a tap
 # cannot shut the board down.
@@ -101,16 +110,172 @@ class PhoneControl:
         return True
 
 
-def lan_ip() -> str:
-    """Best-guess address a phone on the same network can use to reach the Pi."""
+def phone_url(port: int = 8080) -> str:
+    """The address that stays the same across reboots and DHCP changes."""
+    return f"http://{STABLE_HOST}:{port}"
+
+
+def _is_private(ip: str) -> bool:
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        octets = [int(part) for part in parts]
+    except ValueError:
+        return False
+    if any(octet < 0 or octet > 255 for octet in octets):
+        return False
+    if octets[0] == 10:
+        return True
+    if octets[0] == 192 and octets[1] == 168:
+        return True
+    return octets[0] == 172 and 16 <= octets[1] <= 31
+
+
+def _routed_ipv4() -> Optional[str]:
+    """Source address the kernel would use to reach the wider network."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        sock.connect(("192.168.0.1", 80))
+        sock.connect(("8.8.8.8", 80))
         return sock.getsockname()[0]
     except OSError:
-        return "127.0.0.1"
+        return None
     finally:
         sock.close()
+
+
+def interface_ipv4_addresses() -> list[str]:
+    """IPv4 addresses currently assigned to real interfaces."""
+    try:
+        import fcntl
+    except ImportError:
+        return []
+    found: list[str] = []
+    try:
+        names = socket.if_nameindex()
+    except OSError:
+        return found
+    for _index, name in names:
+        if name == "lo":
+            continue
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            packed = fcntl.ioctl(
+                sock.fileno(),
+                0x8915,  # SIOCGIFADDR
+                struct.pack("256s", name.encode("utf-8")[:15]),
+            )
+        except OSError:
+            continue
+        finally:
+            sock.close()
+        found.append(socket.inet_ntoa(packed[20:24]))
+    return found
+
+
+def preferred_lan_ip(addresses: Optional[list[str]] = None) -> Optional[str]:
+    """Address a phone on the home network can reach. Loopback is never chosen."""
+    routed = None
+    if addresses is None:
+        routed = _routed_ipv4()
+        addresses = list(interface_ipv4_addresses())
+        if routed and routed not in addresses:
+            addresses.insert(0, routed)
+    private = [ip for ip in addresses if _is_private(ip)]
+    if routed and routed in private:
+        return routed
+    if private:
+        return private[0]
+    for ip in addresses:
+        if ip and not ip.startswith("127.") and ip != "0.0.0.0":
+            return ip
+    return None
+
+
+def lan_ip() -> str:
+    """Best-guess address a phone on the same network can use to reach the Pi."""
+    return preferred_lan_ip() or "127.0.0.1"
+
+
+def stable_service(port: int, address: str):
+    """mDNS record that points the fixed name at this machine."""
+    from zeroconf import ServiceInfo
+
+    return ServiceInfo(
+        "_http._tcp.local.",
+        "T-Minus Pi._http._tcp.local.",
+        addresses=[socket.inet_aton(address)],
+        port=port,
+        server=f"{STABLE_HOST}.",
+        properties={"path": "/"},
+    )
+
+
+def avahi_publish_command(address: str) -> Optional[list[str]]:
+    """Command that asks the Pi's Avahi daemon to publish the fixed name."""
+    if shutil.which("avahi-publish"):
+        return ["avahi-publish", "-a", "-R", STABLE_HOST, address]
+    if shutil.which("avahi-publish-address"):
+        return ["avahi-publish-address", "-R", STABLE_HOST, address]
+    return None
+
+
+def _announce_with_zeroconf(port: int, address: str) -> tuple[bool, str]:
+    global _ANNOUNCER
+    try:
+        from zeroconf import IPVersion, Zeroconf
+    except ImportError:
+        return False, "zeroconf is not installed"
+    announcer = None
+    try:
+        announcer = Zeroconf(ip_version=IPVersion.V4Only)
+        announcer.register_service(stable_service(port, address))
+    except Exception as exc:
+        if announcer is not None:
+            announcer.close()
+        return False, str(exc)
+    _ANNOUNCER = announcer
+    return True, ""
+
+
+def _announce_with_avahi(address: str) -> tuple[bool, str]:
+    """Publish through Avahi when it already owns the mDNS port."""
+    global _ANNOUNCER
+    import subprocess
+    import time
+
+    command = avahi_publish_command(address)
+    if command is None:
+        return False, "avahi-publish is not installed"
+    proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    time.sleep(0.4)
+    if proc.poll() is not None:
+        detail = proc.stderr.read().decode("utf-8", "replace").strip() if proc.stderr else ""
+        return False, detail or "avahi-publish exited"
+    _ANNOUNCER = proc
+    return True, ""
+
+
+def advertise_stable_name(port: int, address: str) -> bool:
+    """Tell the local network that ``t-minus-pi.local`` is this Pi, until exit."""
+    # On the Pi, Avahi already owns multicast DNS. Publish through it when
+    # the helper is installed, and use the Python announcer otherwise.
+    avahi_error = ""
+    if avahi_publish_command(address):
+        ok, avahi_error = _announce_with_avahi(address)
+        if ok:
+            return True
+    ok, zeroconf_error = _announce_with_zeroconf(port, address)
+    if ok:
+        return True
+    if avahi_error:
+        print(f"Phone name was not announced: {avahi_error}", flush=True)
+    print(f"Phone name was not announced: {zeroconf_error}", flush=True)
+    if "Address already in use" in zeroconf_error or "Errno 98" in zeroconf_error:
+        print("Install the Pi helper with: sudo apt install -y avahi-utils", flush=True)
+    else:
+        print("Install it once with: .venv/bin/pip install zeroconf", flush=True)
+    return False
 
 
 def start_phone_server(

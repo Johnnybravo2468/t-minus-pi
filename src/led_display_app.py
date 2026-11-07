@@ -27,9 +27,10 @@ exactly where physical buttons will plug in later:
 Interactive mode still refreshes the station currently on screen every
 ``--interval`` seconds. Keys only change which station that is.
 
-The same controls are served on the local network for a phone:
+The same controls are served on the local network for a phone. The address
+does not change when the Pi's numeric address does:
 
-    http://<pi-address>:8080
+    http://t-minus-pi.local:8080
 
 Flags:
     --emulator        use RGBMatrixEmulator instead of real hardware
@@ -65,7 +66,13 @@ from src.input_controller import (
 from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
 from src.line_stations import build_all_line_stations
 from src.mbta_client import MBTAClient
-from src.phone_control import PhoneControl, lan_ip, start_phone_server
+from src.phone_control import (
+    PhoneControl,
+    advertise_stable_name,
+    phone_url,
+    preferred_lan_ip,
+    start_phone_server,
+)
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, _line_family, station_manager_from_config
 from src.transit_service import StationFetch, fetch_station_departures
@@ -299,7 +306,13 @@ def _start_phone(args: argparse.Namespace, commands: queue.Queue) -> None:
     if server is None:
         return
     _PHONE = control
-    print(f"Phone controls: http://{lan_ip()}:{args.web_port}", flush=True)
+    ip = preferred_lan_ip()
+    announced = bool(ip) and advertise_stable_name(args.web_port, ip)
+    print(f"Phone controls: {phone_url(args.web_port)}", flush=True)
+    if ip and not announced:
+        print(f"Current address: http://{ip}:{args.web_port}", flush=True)
+    elif not ip:
+        print("No network address found, so the phone page is not reachable yet.", flush=True)
 
 
 async def _run_loop(args: argparse.Namespace) -> None:
