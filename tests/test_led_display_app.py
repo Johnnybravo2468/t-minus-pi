@@ -9,6 +9,7 @@ from src.input_controller import BUTTON_3, NEXT_STATION, PREVIOUS_STATION, TOGGL
 from src.led_display_app import KEY_TO_EVENT, _make_display, _parse_args, build_board
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.transit_model import Departure
+from src.transit_service import StationFetch
 from tests.test_rpi_led_display import FakeOptions, FakeMatrix
 
 
@@ -122,3 +123,36 @@ def test_cache_keeps_last_good_on_empty_fetch(monkeypatch):
     first, second = asyncio.run(run())
     assert first == good
     assert second == good  # empty fetch fell back to last good board
+
+
+def test_failed_refresh_names_the_fault_and_keeps_the_board(monkeypatch):
+    app._DEPARTURE_CACHE.clear()
+    app._LAST_STATUS = ""
+    app._PRINTED_STATUS = None
+    station = RouteConfig(id="s3", type="subway", route_id="Red",
+                          stop_id="place-dwnxg", name="Downtown Crossing")
+    good = _departures()
+    calls = {"n": 0}
+
+    async def fake_fetch(client, station, station_name, max_per_direction=3):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return StationFetch(departures=good)
+        return StationFetch(
+            departures=[],
+            error="[Errno -3] Temporary failure in name resolution",
+        )
+
+    monkeypatch.setattr(app, "fetch_station_departures", fake_fetch)
+    monkeypatch.setattr(app, "has_default_route", lambda: True)
+    monkeypatch.setattr(app, "CACHE_TTL_SECONDS", 0.0)
+
+    async def run():
+        first = await app._get_departures(None, station, "x")
+        second = await app._get_departures(None, station, "x")
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert first == good
+    assert second == good
+    assert app._LAST_STATUS == "NO DNS"

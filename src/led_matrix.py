@@ -137,12 +137,20 @@ def _abbreviate(text: str, max_chars: int) -> str:
     return text[:max_chars]
 
 
+def _status_color(status: str) -> RGB:
+    """Amber for a degraded-but-showing board, red when data cannot be reached."""
+    if status == "RATE LIMIT":
+        return AMBER
+    return RED
+
+
 def render_station_board(
     matrix: PixelMatrix,
     station_name: str,
     route_label: str,
     departures: List[Departure],
     line_color: RGB = GREEN,
+    status: str = "",
 ) -> None:
     """Lay out a station board onto the matrix, adapting to the panel size.
 
@@ -166,6 +174,11 @@ def render_station_board(
     # (right) are tinted to the line's color.
     matrix.draw_text(0, 0, _abbreviate(station_name, cols - len(route_label) - 1), line_color)
     matrix.draw_text_right(right_x, 0, route_label, line_color)
+
+    # Tall panels leave row 1 blank between the header and the sections.
+    # A fault code goes there. Short panels use that row for a departure.
+    if status and rows >= 7:
+        matrix.draw_text(0, CELL_HEIGHT, _abbreviate(status, cols), _status_color(status))
 
     if rows >= 7:
         _render_sections(matrix, cols, rows, right_x, inbound, outbound, line_color)

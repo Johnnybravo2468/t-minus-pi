@@ -41,6 +41,7 @@ from time import monotonic
 
 from src.app_controller import AppController
 from src.config import load_config
+from src.diagnostics import has_default_route, panel_status
 from src.display_encoder import compact_route_label
 from src.input_controller import (
     BUTTON_3,
@@ -54,7 +55,7 @@ from src.line_stations import build_all_line_stations
 from src.mbta_client import MBTAClient
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, _line_family, station_manager_from_config
-from src.transit_service import fetch_station_departures
+from src.transit_service import StationFetch, fetch_station_departures
 
 # Keyboard keys mapped to abstract input events (the same events physical
 # buttons will emit through a WirelessInputController later).
@@ -136,6 +137,7 @@ def build_board(
     station_name: str,
     departures,
     route_label: str = "",
+    status: str = "",
 ) -> PixelMatrix:
     matrix = PixelMatrix(display.width, display.height)
     if not route_label and departures:
@@ -146,7 +148,14 @@ def build_board(
         line_color = color_for_line("Green Line")
     else:
         line_color = WHITE
-    render_station_board(matrix, station_name, route_label, departures, line_color=line_color)
+    render_station_board(
+        matrix,
+        station_name,
+        route_label,
+        departures,
+        line_color=line_color,
+        status=status,
+    )
     return matrix
 
 
@@ -156,20 +165,44 @@ def build_board(
 # last good board if a refresh fails.
 CACHE_TTL_SECONDS = 10.0
 _DEPARTURE_CACHE: dict = {}
+# Fault code for the most recent refresh. Empty when the board is healthy.
+_LAST_STATUS = ""
+_PRINTED_STATUS: str | None = None
+
+
+def _set_status(status: str) -> None:
+    """Remember the code drawn on the panel, and print it once when it changes."""
+    global _LAST_STATUS, _PRINTED_STATUS
+    _LAST_STATUS = status
+    if status == _PRINTED_STATUS:
+        return
+    _PRINTED_STATUS = status
+    if status:
+        print(f"[diag] {status}", flush=True)
 
 
 async def _get_departures(client: MBTAClient, station, header_name: str):
     now = monotonic()
     cached = _DEPARTURE_CACHE.get(station.id)
     if cached and now - cached[0] < CACHE_TTL_SECONDS:
+        _set_status("")
         return cached[1]
-    departures = await fetch_station_departures(
+    fetched = await fetch_station_departures(
         client, station, station_name=header_name, max_per_direction=3
     )
+    # Tests and older callers may still return a bare list.
+    if isinstance(fetched, StationFetch):
+        departures = fetched.departures
+        error = fetched.error
+    else:
+        departures = fetched
+        error = None
     if departures:
         _DEPARTURE_CACHE[station.id] = (now, departures)
+        _set_status("")
         return departures
-    # Fetch returned nothing (e.g. rate-limited): reuse the last good board.
+    # A failed refresh keeps the last good board. The status row says why.
+    _set_status(panel_status(error, has_default_route()))
     return cached[1] if cached else departures
 
 
@@ -186,6 +219,7 @@ async def _render_current(
             header_name,
             departures,
             route_label=route_label_for_station(station),
+            status=_LAST_STATUS,
         )
     )
 

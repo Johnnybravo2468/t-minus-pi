@@ -63,9 +63,11 @@ async def _live_departures() -> List[Departure]:
     client = MBTAClient(api_key=config.mbta_api_key)
     station = DEFAULT_STATIONS[0]  # Fenway - Green Line (D)
     try:
-        return await fetch_station_departures(
-            client, station, station_name="Fenway", max_per_direction=3
-        )
+        return (
+            await fetch_station_departures(
+                client, station, station_name="Fenway", max_per_direction=3
+            )
+        ).departures
     finally:
         await client.aclose()
 

@@ -12,6 +12,7 @@ Keeping this bridge separate means:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
@@ -79,14 +80,25 @@ def normalize_departures(card: dict, station_name: str) -> List[Departure]:
     return departures
 
 
+@dataclass
+class StationFetch:
+    """Normalized departures plus the client error string, if the fetch failed."""
+
+    departures: List[Departure]
+    error: Optional[str] = None
+
+
 async def fetch_station_departures(
     client: MBTAClient,
     route_config: RouteConfig,
     station_name: str,
     max_per_direction: int = 3,
-) -> List[Departure]:
+) -> StationFetch:
     """Fetch live data via the existing client and return normalized departures."""
     card = await client.get_route_departures(
         route_config, max_per_direction=max_per_direction, include_alerts=False
     )
-    return normalize_departures(card, station_name)
+    return StationFetch(
+        departures=normalize_departures(card, station_name),
+        error=card.get("error"),
+    )

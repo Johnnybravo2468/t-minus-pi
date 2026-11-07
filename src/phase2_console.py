@@ -86,9 +86,11 @@ async def _show_live_departures(manager: StationManager) -> None:
     client = MBTAClient(api_key=config.mbta_api_key)
     try:
         station = manager.current_station()
-        departures = await fetch_station_departures(
-            client, station, station_name=station.name, max_per_direction=2
-        )
+        departures = (
+            await fetch_station_departures(
+                client, station, station_name=station.name, max_per_direction=2
+            )
+        ).departures
     finally:
         await client.aclose()
 
