@@ -27,6 +27,10 @@ exactly where physical buttons will plug in later:
 Interactive mode still refreshes the station currently on screen every
 ``--interval`` seconds. Keys only change which station that is.
 
+The same controls are served on the local network for a phone:
+
+    http://<pi-address>:8080
+
 Flags:
     --emulator        use RGBMatrixEmulator instead of real hardware
     --once            render a single frame and exit
@@ -34,6 +38,8 @@ Flags:
     --rotate          cycle to the next station on each refresh
     --interactive     control stations/mode from the keyboard
     --brightness N    panel brightness 1-100 (default 60)
+    --web-port N      phone button page port (default 8080)
+    --no-web          do not serve the phone button page
 """
 
 from __future__ import annotations
@@ -59,6 +65,7 @@ from src.input_controller import (
 from src.led_matrix import WHITE, PixelMatrix, color_for_line, render_station_board
 from src.line_stations import build_all_line_stations
 from src.mbta_client import MBTAClient
+from src.phone_control import PhoneControl, lan_ip, start_phone_server
 from src.rpi_led_display import RaspberryPiLEDDisplay
 from src.station_manager import StationManager, _line_family, station_manager_from_config
 from src.transit_service import StationFetch, fetch_station_departures
@@ -105,6 +112,10 @@ def _parse_args() -> argparse.Namespace:
                         help="load every station on every subway line from the MBTA API")
     parser.add_argument("--include-commuter", action="store_true",
                         help="with --all-lines, also include commuter rail")
+    parser.add_argument("--web-port", type=int, default=8080,
+                        help="port for the phone button page")
+    parser.add_argument("--no-web", action="store_true",
+                        help="do not serve the phone button page")
     return parser.parse_args()
 
 
@@ -210,6 +221,8 @@ _DEPARTURE_CACHE: dict = {}
 # Fault code for the most recent refresh. Empty when the board is healthy.
 _LAST_STATUS = ""
 _PRINTED_STATUS: str | None = None
+# Phone page state. None until the local web server starts.
+_PHONE: PhoneControl | None = None
 
 
 def _set_status(status: str) -> None:
@@ -265,6 +278,28 @@ async def _render_current(
             line_hint=_line_family(station),
         )
     )
+    _publish_phone(manager)
+
+
+def _publish_phone(manager: StationManager) -> None:
+    phone = _PHONE
+    if phone is None:
+        return
+    station = manager.current_station()
+    phone.update(station_header_name(station), manager.current_line(), _LAST_STATUS)
+
+
+def _start_phone(args: argparse.Namespace, commands: queue.Queue) -> None:
+    """Serve the button page on the LAN and print the address a phone can open."""
+    global _PHONE
+    if args.no_web:
+        return
+    control = PhoneControl(commands)
+    server = start_phone_server(control, port=args.web_port)
+    if server is None:
+        return
+    _PHONE = control
+    print(f"Phone controls: http://{lan_ip()}:{args.web_port}", flush=True)
 
 
 async def _run_loop(args: argparse.Namespace) -> None:
@@ -272,14 +307,30 @@ async def _run_loop(args: argparse.Namespace) -> None:
     display = _make_display(args)
     client = MBTAClient(api_key=config.mbta_api_key)
     manager = await _build_manager(args, config, client)
+    commands: queue.Queue = queue.Queue()
+    _start_phone(args, commands)
+    controller = AppController(manager)
+    inputs = SimulatedInputController()
+    controller.connect(inputs)
     try:
+        await _render_current(client, display, manager)
         while True:
-            await _render_current(client, display, manager)
             if args.once:
                 break
+            try:
+                line = await _read_command(commands, args.interval)
+            except EOFError:
+                break
+            if line:
+                action = apply_interactive_key(str(line).strip().lower(), inputs)
+                if action == "quit":
+                    break
+                if action != "unknown":
+                    await _render_current(client, display, manager)
+                continue
             if args.rotate:
                 manager.next_station()
-            await asyncio.sleep(args.interval)
+            await _render_current(client, display, manager)
     finally:
         await client.aclose()
         display.clear()
@@ -298,9 +349,8 @@ def apply_interactive_key(key: str, inputs: SimulatedInputController) -> str:
     return "ok"
 
 
-def _spawn_command_reader() -> queue.Queue:
+def _spawn_command_reader(lines: queue.Queue) -> None:
     """Read keyboard lines on a daemon thread so the panel can refresh meanwhile."""
-    lines: queue.Queue = queue.Queue()
 
     def _read() -> None:
         while True:
@@ -311,7 +361,6 @@ def _spawn_command_reader() -> queue.Queue:
                 return
 
     threading.Thread(target=_read, name="led-keyboard", daemon=True).start()
-    return lines
 
 
 async def _read_command(lines: queue.Queue, interval: float):
@@ -355,7 +404,9 @@ async def _run_interactive(args: argparse.Namespace) -> None:
     controller = AppController(manager)
     inputs = SimulatedInputController()
     controller.connect(inputs)
-    commands = _spawn_command_reader()
+    commands: queue.Queue = queue.Queue()
+    _spawn_command_reader(commands)
+    _start_phone(args, commands)
 
     async def read_line(interval: float):
         return await _read_command(commands, interval)
